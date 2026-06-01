@@ -4,7 +4,7 @@ Application de planification d'itinéraires sportifs (vélo, randonnée, course 
 
 ---
 
-## 🗂 Architecture du projet
+## Architecture du projet
 
 ```
 GIN_projet/
@@ -35,7 +35,7 @@ GIN_projet/
 
 ---
 
-## ⚡ Démarrage rapide (à faire à chaque session)
+## Démarrage rapide (à faire à chaque session)
 
 ### Prérequis installés une seule fois
 - [Go 1.21+](https://go.dev/dl/)
@@ -70,7 +70,7 @@ docker stop gin_pgrouting
 
 ---
 
-## 🔧 Installation initiale (une seule fois)
+## Installation initiale (une seule fois)
 
 ### 1. Créer le conteneur PostgreSQL + PostGIS + pgRouting
 ```cmd
@@ -103,7 +103,7 @@ go mod tidy
 
 ---
 
-## 🗺 Fonds de carte
+## Fonds de carte
 
 L'application utilise les APIs Swisstopo (gratuites, pas de clé requise) :
 
@@ -114,7 +114,7 @@ L'application utilise les APIs Swisstopo (gratuites, pas de clé requise) :
 
 ---
 
-## 📡 API endpoints
+## API endpoints
 
 ### Recherche d'itinéraires
 ```
@@ -150,7 +150,7 @@ GET /api/health
 
 ---
 
-## 🏃 Fonctionnalités
+## Fonctionnalités
 
 ### Rechercher
 - Point de départ par adresse (géocodage Nominatim), GPS ou clic carte
@@ -181,7 +181,7 @@ GET /api/health
 
 ---
 
-## 🧮 Calcul de vitesse
+## Calcul de vitesse
 
 Le backend calcule la vitesse moyenne selon le sport et le profil utilisateur :
 
@@ -196,7 +196,7 @@ Le rayon du point intermédiaire est : `distance / 2.6` (boucle) ou `distance / 
 
 ---
 
-## 🛠 Technologies utilisées
+## Technologies utilisées
 
 | Composant | Technologie |
 |-----------|-------------|
@@ -211,7 +211,7 @@ Le rayon du point intermédiaire est : `distance / 2.6` (boucle) ou `distance / 
 
 ---
 
-## ⚠️ Dépannage
+## Dépannage
 
 | Problème | Solution |
 |----------|----------|
