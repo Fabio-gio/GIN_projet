@@ -1,13 +1,22 @@
 /**
- * api.js — Communication backend Go/Gin
+ * api.js — Communication avec le backend Go/Gin
  * GIN Webmapping — HEIG-VD
+ *
+ * Centralise les appels REST pour les POIs et l'altitude MNT.
+ * Si le backend n'est pas démarré, utilise DEMO_POIS (données statiques)
+ * pour que l'interface reste fonctionnelle sans PostgreSQL.
+ *
+ * Fonctions exposées : loadPOIs, getElevation
  */
 
+// URL de base de l'API — dupliquée ici par sécurité si api.js charge avant map.js.
 const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
   ? 'http://localhost:8080/api'
   : '/api';
 
 // POIs
+// Charge les POIs depuis GET /api/pois.
+// En cas d'erreur : fallback sur DEMO_POIS (données statiques).
 async function loadPOIs() {
   try {
     const res = await fetch(`${API_BASE}/pois`);
@@ -20,6 +29,7 @@ async function loadPOIs() {
   }
 }
 
+// Crée les marqueurs Leaflet pour chaque POI avec icône par catégorie et popup.
 function renderPOIs(features) {
   layers.pois.clearLayers();
   features.forEach(f => {
@@ -32,7 +42,7 @@ function renderPOIs(features) {
     marker.bindPopup(`
       <div class="popup-content">
         <h4>${p.name}</h4>
-        <p>${p.description || '—'}</p>
+        <p>${p.description || '"”'}</p>
         <span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;
           font-weight:600;text-transform:uppercase;background:${color}22;color:${color}">
           ${p.category}
@@ -49,17 +59,19 @@ function renderPOIs(features) {
   });
 }
 
+// Supprime un POI via DELETE /api/pois/:id puis recharge la liste.
 window.deletePOI = async function(id) {
   try {
     await fetch(`${API_BASE}/pois/${id}`, { method: 'DELETE' });
     await loadPOIs();
-    showToast('POI supprimé ✓', 'success');
+    showToast('POI supprimé âœ“', 'success');
   } catch {
     showToast('Erreur suppression', 'error');
   }
 };
 
 // POIs de démo si backend non démarré
+// Données de démonstration utilisées si le backend n'est pas disponible.
 const DEMO_POIS = [
   { geometry:{type:'Point',coordinates:[6.6413,46.7785]}, properties:{id:'d1',name:'HEIG-VD Yverdon',description:"École d'ingénieurs HES-SO",category:'education'} },
   { geometry:{type:'Point',coordinates:[6.6411,46.7784]}, properties:{id:'d2',name:"Château d'Yverdon",description:'Château médiéval XIIIe s.',category:'patrimoine'} },
@@ -70,6 +82,8 @@ const DEMO_POIS = [
 ];
 
 // Altitude MNT
+// Récupère l'altitude d'un point via GET /api/mnt/elevation.
+// Utilisé dans tools.js au clic droit. Retourne null si indisponible.
 async function getElevation(lat, lon) {
   try {
     const res = await fetch(`${API_BASE}/mnt/elevation?lat=${lat}&lon=${lon}`);
@@ -80,6 +94,7 @@ async function getElevation(lat, lon) {
   }
 }
 
+// Export des fonctions globales.
 window.API_BASE = API_BASE;
 window.loadPOIs = loadPOIs;
 window.getElevation = getElevation;

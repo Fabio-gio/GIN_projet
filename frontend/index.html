@@ -1,22 +1,76 @@
 <!DOCTYPE html>
+<!--
+  ================================================================
+  index.html — Interface principale de ChronoPath
+  Application de planification d'itinéraires sportifs en Suisse romande
+  Cours GIN — HEIG-VD — 2025-2026
+  ================================================================
+
+  STRUCTURE DE LA PAGE :
+  ┌─────────────┬─────────────────────────────────────┐
+  │  <aside>    │         <div id="map">              │
+  │  Sidebar    │  Carte Leaflet + Swisstopo WMTS     │
+  │  (gauche)   │  (plein écran, à droite)            │
+  └─────────────┴─────────────────────────────────────┘
+
+  PANNEAUX DE LA SIDEBAR (un seul visible à la fois) :
+    #panel-rechercher  → Recherche d'itinéraires via pgRouting
+    #panel-creer       → Tracé manuel point par point
+    #panel-sauvegardes → Import GPX + liste des sauvegardés
+    #panel-itineraire  → Calcul A→B avec étapes (Dijkstra)
+
+  ORDRE DE CHARGEMENT DES SCRIPTS (important — dépendances) :
+    1. Leaflet 1.9.4    → bibliothèque carte (variable L)
+    2. Leaflet.Draw     → outils de dessin (polygone, ligne, point)
+    3. map.js           → crée `map`, `layers`, `showToast`, `API_BASE`
+    4. cantons.js       → loadCantons(), routes OSM dynamiques
+    5. trails.js        → TRAILS[], itinéraires prédéfinis
+    6. search.js        → searchRoutesPgR(), setSearchStart()
+    7. routing.js       → calculateRoute(), étapes A→B, GPX
+    8. app.js           → sliders, onglets, boutons, init()
+    9. create.js        → onglet Créer + Sauvegardés + calculateur temps
+  ================================================================
+-->
 <html lang="fr">
 <head>
+  <!-- Encodage UTF-8 — nécessaire pour les caractères accentués français -->
   <meta charset="UTF-8" />
+  <!-- Viewport responsive — adapte la mise en page à la taille d'écran -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Favicon : logo ChronoPath affiché dans l'onglet du navigateur -->
   <link rel="icon" type="image/png" href="images/logo2.png">
   <title>ChronoPath — Itinéraires sportifs Suisse romande</title>
+  <!-- CSS Leaflet 1.9.4 — styles de la carte (marqueurs, popups, contrôles zoom) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- CSS Leaflet.Draw — styles des outils de numérisation (dessin sur carte) -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+  <!-- Google Fonts : Inter (interface) + JetBrains Mono (valeurs numériques) -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <!-- Feuille de styles principale de l'application (servie par Go via r.Static) -->
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
+
+<!-- ================================================================
+     SIDEBAR — Panneau latéral gauche
+     Contient toute l'interface utilisateur.
+     La carte occupe le reste de la page (flexbox, voir style.css).
+     ================================================================ -->
 <aside id="sidebar">
+
+  <!-- En-tête : logo + onglets sport + sous-onglets de navigation -->
   <div class="sidebar-header">
+
+    <!-- Logo et nom de l'application -->
     <div class="logo">
       <img src="images/logo2.png" alt="logo2" style="height:40px;border-radius:6px;flex-shrink:0;" />
       <div><h1>ChronoPath</h1><p>Itinéraires sportifs suisses</p></div>
     </div>
+
+    <!-- Onglets sport : Vélo / Rando / Course
+         data-sport → lu par app.js pour afficher les filtres correspondants
+         (filters-velo, filters-rando, filters-course)
+         Les icônes sont des SVG inline (autonomes, pas de dépendance externe) -->
     <div class="sport-tabs">
       <button class="sport-tab active" data-sport="velo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M15 6a1 1 0 100-2 1 1 0 000 2zm-3 11.5V14l-3-3 4-3 2 3h2"/></svg> Vélo
@@ -28,6 +82,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13" cy="3" r="1.5"/><path d="M7 8l3 2 2-4h3l1 3-3 2"/><path d="M10 10l-2 5 4 1"/><path d="M15 7l1 4-3 2 1 4"/><path d="M8 15l-2 4"/><path d="M14 13l2 5"/></svg>Course
       </button>
     </div>
+
+    <!-- Sous-onglets de navigation principale
+         data-tab → correspond aux IDs des panneaux (panel-{tab})
+         La logique de switch est gérée dans app.js -->
     <div class="sub-tabs">
       <button class="sub-tab active" data-tab="rechercher">Rechercher</button>
       <button class="sub-tab" data-tab="creer">Créer</button>
@@ -36,9 +94,18 @@
     </div>
   </div>
 
-  <!-- RECHERCHER -->
+  <!-- ================================================================
+       PANNEAU RECHERCHER (#panel-rechercher)
+       L'utilisateur définit un point de départ et des critères pour
+       recevoir 3 itinéraires calculés par pgRouting sur le réseau OSM.
+       ================================================================ -->
   <div class="tab-panel active" id="panel-rechercher">
-    <!-- POINT DE DÉPART (obligatoire) -->
+
+    <!-- Point de départ obligatoire — 3 modes de saisie :
+         1. Adresse texte → géocodage Nominatim (OSM, gratuit, sans clé)
+         2. GPS           → navigator.geolocation.getCurrentPosition()
+         3. Clic carte    → mode picking avec curseur crosshair
+         Les coordonnées sont stockées dans searchStartCoords (search.js) -->
     <div class="start-block">
       <div class="start-header">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>
@@ -46,20 +113,26 @@
       </div>
       <div class="start-input-row" style="display:flex;gap:4px;align-items:center;overflow:visible">
         <input type="text" id="start-input" placeholder="Adresse, ville..." style="flex:1;min-width:0" />
+        <!-- Bouton recherche adresse → geocodeStart() dans search.js -->
         <button id="btn-start-search" class="btn-start-icon" title="Rechercher">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
         </button>
+        <!-- Bouton GPS → navigator.geolocation -->
         <button id="btn-start-gps" class="btn-start-icon" title="Ma position GPS">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>
         </button>
+        <!-- Bouton clic carte → mode picking (curseur crosshair) -->
         <button id="btn-start-map" class="btn-start-icon" title="Cliquer sur la carte" style="background:#457b9d;flex-shrink:0">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
         </button>
       </div>
+      <!-- Label mis à jour par setSearchStart() dans search.js -->
       <div id="start-label" class="start-label">Aucun point de départ sélectionné</div>
     </div>
 
-    <!-- MODE : BOUCLE ou Aller simple -->
+    <!-- Mode de calcul :
+         Boucle       → 3 boucles triangulaires source→mid1→mid2→source
+         Aller simple → 3 itinéraires one-way dans différentes directions -->
     <div class="filter-group">
       <div class="filter-label"><span>MODE</span></div>
       <div class="btn-group">
@@ -68,6 +141,12 @@
       </div>
     </div>
 
+    <!-- Filtres VÉLO (visibles uniquement quand data-sport="velo")
+         FTP   : Functional Threshold Power en W/kg
+                 Formule vitesse : v = 10 + FTP × 4 km/h
+                 Ajustement niveau : ×0.75 (débutant) / ×1.0 (moyen) / ×1.15 (expert)
+         Durée : durée souhaitée → détermine la distance cible
+         Dénivelé max : filtre par D+ maximum accepté -->
     <div class="filters" id="filters-velo">
       <div class="filter-group">
         <div class="filter-label"><span>NIVEAU FTP (W/KG)</span><span class="filter-value" id="ftp-val">3.0 W/kg</span></div>
@@ -100,6 +179,10 @@
       </div>
     </div>
 
+    <!-- Filtres RANDO (visibles uniquement quand data-sport="rando")
+         Niveau   : détermine la vitesse Naismith (3 / 4.5 / 6.0 km/h)
+         Durée    : durée souhaitée de la randonnée
+         Dénivelé : filtre par D+ maximum -->
     <div class="filters hidden" id="filters-rando">
       <div class="filter-group">
         <div class="filter-label"><span>NIVEAU </span><span class="filter-value" id="Niv-val"></span></div>
@@ -126,6 +209,12 @@
       </div>
     </div>
 
+    <!-- Filtres COURSE (visibles uniquement quand data-sport="course")
+         VAP    : Vitesse Aérobie Maximale en min/km (affichage) / km/h (calcul)
+                  Conversion : vitesse_kmh = 60 / VAP_minkm
+                  Facteur distance : ×0.95 (≤5km) / ×0.90 (≤10km) / ×0.85 (semi)
+         Distance : distance cible en km
+         Type : Route / Trail / Piste -->
     <div class="filters hidden" id="filters-course">
       <div class="filter-group">
         <div class="filter-label"><span>Allure VAP </span><span class="filter-value" id="VAP-val">5.5 min/km</span></div>
@@ -151,57 +240,105 @@
       </div>
     </div>
 
+    <!-- Bouton de lancement de la recherche pgRouting
+         Déclenche searchRoutesPgR() dans search.js
+         Désactivé pendant le calcul (feedback visuel) -->
     <button class="btn-search" id="btn-search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
       Trouver des itinéraires
     </button>
 
+    <!-- Zone de résultats (masquée par défaut, affichée par displaySearchResults())
+         results-count : "N ITINÉRAIRES — pgRouting ✓" ou "(estimation)"
+         results-list  : cartes HTML générées dynamiquement dans search.js -->
     <div id="results-section" class="hidden">
       <div class="results-header"><span id="results-count"></span></div>
       <div id="results-list"></div>
     </div>
   </div>
 
-  <!-- CRÉER -->
+  <!-- ================================================================
+       PANNEAU CRÉER (#panel-creer)
+       Tracé manuel d'itinéraire point par point sur la carte.
+       Flux :
+         1. Clic "Tracer" → isDrawing=true, curseur crosshair
+         2. Clics sur la carte → points dans createWaypoints[]
+         3. Clic "Calculer via pgRouting" → GET /api/route par segment
+         4. Tracé orange + distance/durée affichés
+         5. "Sauvegarder" → stockage dans localStorage
+       ================================================================ -->
   <div class="tab-panel hidden" id="panel-creer">
     <div class="create-info">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="32" height="32"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       <p>Tracez votre itinéraire directement sur la carte</p>
     </div>
+    <!-- Formulaire de sauvegarde — soumis par create.js -->
     <form id="create-form">
       <input type="text" id="trail-name" placeholder="Nom de l'itinéraire" required />
       <input type="text" id="trail-desc" placeholder="Description" />
       <select id="trail-sport"><option value="velo"> Vélo</option><option value="rando"> Rando</option><option value="course"> Course</option></select>
       <select id="trail-diff"><option value="facile">Facile</option><option value="moyen">Moyen</option><option value="difficile">Difficile</option></select>
+      <!-- Statistiques en temps réel (mises à jour pendant le tracé) -->
       <div class="create-stats">
         <div class="stat-mini"><span class="stat-mini-val" id="cs-dist">0 km</span><span>Distance</span></div>
         <div class="stat-mini"><span class="stat-mini-val" id="cs-pts">0</span><span>Points</span></div>
         <div class="stat-mini"><span class="stat-mini-val" id="cs-dur">—</span><span>Durée</span></div>
       </div>
       <p class="hint"> Cliquez sur la carte pour tracer</p>
+      <!-- btn-draw-trail et btn-clear-trail gérés dans app.js -->
       <div class="btn-row">
         <button type="button" class="btn-secondary" id="btn-draw-trail">Tracer</button>
         <button type="button" class="btn-secondary" id="btn-clear-trail">Effacer</button>
       </div>
+      <!-- btn-calc-create géré dans create.js — appelle /api/route par segment -->
       <button type="button" class="btn-search" id="btn-calc-create" disabled> Calculer via pgRouting</button>
+      <!-- btn-save-trail activé uniquement après calcul réussi -->
       <button type="submit" class="btn-search" id="btn-save-trail" disabled style="background:#457b9d;margin-top:4px"> Sauvegarder</button>
     </form>
   </div>
 
-  <!-- SAUVEGARDÉS -->
+  <!-- ================================================================
+       PANNEAU SAUVEGARDÉS (#panel-sauvegardes)
+       Clé localStorage : 'chronopath-saved'
+       Actions disponibles sur chaque itinéraire :
+         Voir     → affichage sur la carte
+         Modifier → rechargement dans l'onglet Créer
+         Temps    → calculateur de durée (FTP/VAP/Naismith)
+         GPX      → export du fichier .gpx
+         Supprimer → avec confirmation
+       Import GPX :
+         FileReader API → parse XML → extrait <trkpt lat lon> et <ele>
+         Dénivelé positif = somme des différences d'altitude croissantes
+       ================================================================ -->
   <div class="tab-panel hidden" id="panel-sauvegardes">
     <div style="padding:4px 0 10px">
+      <!-- Bouton import GPX → déclenche le file picker -->
       <button onclick="document.getElementById('gpx-import-input').click()" class="btn-search" style="background:#457b9d"> Importer un GPX</button>
+      <!-- Input file masqué — géré dans create.js -->
       <input type="file" id="gpx-import-input" accept=".gpx" style="display:none" />
     </div>
+    <!-- Liste générée dynamiquement par renderSavedItems() dans create.js -->
     <div id="saved-list">
       <div class="empty-state"><p>Aucun itinéraire sauvegardé</p></div>
     </div>
   </div>
 
-  <!-- PANEL ITINÉRAIRE pgRouting -->
+  <!-- ================================================================
+       PANNEAU ITINÉRAIRE A→B (#panel-itineraire)
+       Calcul d'un itinéraire via Dijkstra/pgRouting.
+
+       Modes de saisie (départ A et arrivée B) :
+         - Texte    → geocodeForRoute() → Nominatim → WGS84
+         - Clic 📍  → startPicking() → mode picking (crosshair)
+         - GPS 🎯   → navigator.geolocation.getCurrentPosition()
+
+       Étapes intermédiaires :
+         - Bouton "+ Ajouter une étape" → addWaypointField() (routing.js)
+         - Calcul segmenté : A → étape1 → étape2 → ... → B
+       ================================================================ -->
   <div class="tab-panel hidden" id="panel-itineraire">
 
+    <!-- Sélecteur de sport pour adapter la vitesse de calcul de durée -->
     <div class="route-sport-row">
       <label class="filter-label" style="margin-bottom:4px"><span>SPORT</span></label>
       <select id="route-sport" class="route-select">
@@ -211,7 +348,8 @@
       </select>
     </div>
 
-    <!-- DÉPART -->
+    <!-- Point A — Départ
+         Marqueur vert (makeRouteIcon 'start' dans routing.js) -->
     <div class="route-point-block">
       <div class="route-point-header" style="color:#2d6a4f">
         <span class="route-point-letter" style="background:#2d6a4f">A</span>
@@ -219,26 +357,31 @@
       </div>
       <div class="route-input-row">
         <input type="text" id="route-from-input" placeholder="Adresse de départ..." />
+        <!-- Géocode l'adresse via Nominatim -->
         <button class="btn-route-icon" onclick="geocodeForRoute('route-from-input','route-from-label','start')" title="Rechercher">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
         </button>
+        <!-- Active le mode picking (curseur crosshair) -->
         <button class="btn-route-icon" onclick="startPicking('start')" title="Cliquer sur la carte">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
         </button>
+        <!-- Géolocalisation GPS inline -->
         <button class="btn-route-icon" onclick="navigator.geolocation.getCurrentPosition(p=>{ routeStart={lat:p.coords.latitude,lon:p.coords.longitude}; document.getElementById('route-from-label').textContent='📍 Ma position'; if(routeStart&&routeEnd) calculateRoute(); })" title="GPS">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>
         </button>
       </div>
       <div id="route-from-label" class="route-point-label">Cliquez sur la carte ou entrez une adresse</div>
     </div>
-	
-	<!-- ÉTAPES -->
+
+    <!-- Étapes intermédiaires (insérées dynamiquement par addWaypointField() dans routing.js)
+         Chaque étape : champ adresse + bouton clic carte + bouton supprimer -->
     <div id="waypoints-container"></div>
     <button type="button" onclick="addWaypointField()" class="btn-secondary" style="width:100%;margin:4px 0">
       + Ajouter une étape
     </button>
 
-    <!-- ARRIVÉE -->
+    <!-- Point B — Arrivée
+         Marqueur sombre (makeRouteIcon 'end' dans routing.js) -->
     <div class="route-point-block">
       <div class="route-point-header" style="color:#1a1a2e">
         <span class="route-point-letter" style="background:#1a1a2e">B</span>
@@ -256,7 +399,7 @@
       <div id="route-to-label" class="route-point-label">Cliquez sur la carte ou entrez une adresse</div>
     </div>
 
-    <!-- BOUTONS -->
+    <!-- Boutons de contrôle du calcul -->
     <div class="btn-row">
       <button class="btn-search" id="btn-calc-route" onclick="calculateRoute()">
          Calculer l'itinéraire
@@ -264,7 +407,8 @@
     </div>
     <button class="btn-secondary" onclick="clearRoute()">Effacer</button>
 
-    <!-- RÉSULTAT -->
+    <!-- Zone de résultat (masquée par défaut, affichée par displayRoute() dans routing.js)
+         Contient : distance, durée estimée, source pgRouting/estimation, export GPX -->
     <div id="route-result" class="route-result hidden">
       <div class="route-result-header">Itinéraire calculé <span id="route-source"></span></div>
       <div class="route-result-stats">
@@ -282,24 +426,43 @@
       </button>
     </div>
 
+    <!-- Info sur pgRouting — affiché en permanence dans l'onglet -->
     <div class="route-info-box">
       <strong>pgRouting</strong> calcule le chemin optimal sur le réseau OSM réel.
       Sans base de données, une estimation directe est fournie.
     </div>
   </div>
 
+  <!-- Pied de page de la sidebar -->
   <div class="sidebar-footer">© Swisstopo · HEIG-VD GIN · ChronoPath · Version 2026</div>
 </aside>
 
+<!-- ================================================================
+     CARTE LEAFLET
+     Conteneur plein écran de la carte interactive.
+     Initialisé dans map.js :
+       - center : [46.65, 6.85] (Suisse romande)
+       - zoom   : 9 (vue régionale)
+       - fond   : Swisstopo Topographique (WMTS, gratuit, sans clé)
+     ================================================================ -->
 <div id="map"></div>
 
-<!-- DETAIL PANEL -->
+<!-- ================================================================
+     PANNEAU DÉTAIL
+     Overlay affiché au clic sur un itinéraire prédéfini (trails.js).
+     Contenu généré dynamiquement dans showDetail().
+     Bouton ✕ (detail-close) pour fermer.
+     ================================================================ -->
 <div id="detail-panel" class="hidden">
   <button id="detail-close">✕</button>
   <div id="detail-content"></div>
 </div>
 
-<!-- MAP CONTROLS -->
+<!-- ================================================================
+     CONTRÔLES CARTE (boutons superposés à la carte)
+     ctrl-locate → map.locate() via Leaflet (géolocalisation GPS)
+     ctrl-layers → ouvre/ferme le popup de sélection des couches
+     ================================================================ -->
 <div class="map-controls">
   <button class="map-ctrl-btn" id="ctrl-locate" title="Ma position">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>
@@ -309,6 +472,15 @@
   </button>
 </div>
 
+<!-- ================================================================
+     POPUP SÉLECTEUR DE COUCHES
+     Affiché/masqué par ctrl-layers (map.js).
+     Fond de carte : Topographique ou Orthophoto Swisstopo
+     Couches superposées :
+       - Cantons romands : GeoJSON (SwissBoundaries3D Swisstopo)
+       - Routes OSM      : chargement dynamique via /api/osm-ways,
+                           rechargement automatique au zoom/déplacement
+     ================================================================ -->
 <div id="layers-popup" class="hidden">
   <p class="layers-title">Fond de carte</p>
   <label class="layer-opt active" data-basemap="topo"><span class="layer-dot" style="background:#4CAF50"></span>Carte Topographique</label>
@@ -318,16 +490,24 @@
   <label class="layer-toggle-opt"><input type="checkbox" id="layer-routes-sw" /><span>Routes OSM</span></label>
 </div>
 
+<!-- Notification temporaire 3 secondes — affichée par showToast() dans map.js
+     Classes CSS : .toast.success (vert), .toast.error (rouge), .toast (neutre) -->
 <div id="toast" class="toast"></div>
 
+<!-- ================================================================
+     SCRIPTS — Ordre de chargement obligatoire
+     ================================================================ -->
+<!-- Bibliothèques externes -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Leaflet.Draw : outils de numérisation (point, ligne, polygone) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
-<script src="js/map.js"></script>
-<script src="js/cantons.js"></script>
-<script src="js/trails.js"></script>
-<script src="js/search.js"></script>
-<script src="js/routing.js"></script>
-<script src="js/app.js"></script>
-<script src="js/create.js"></script>
+<!-- Scripts de l'application -->
+<script src="js/map.js"></script>      <!-- 1. Crée `map`, `layers`, `showToast`, `API_BASE` -->
+<script src="js/cantons.js"></script>  <!-- 2. Cantons romands + routes OSM dynamiques -->
+<script src="js/trails.js"></script>   <!-- 3. Itinéraires prédéfinis (TRAILS[]) -->
+<script src="js/search.js"></script>   <!-- 4. Recherche pgRouting, géocodage Nominatim -->
+<script src="js/routing.js"></script>  <!-- 5. Itinéraire A→B, étapes, GPX -->
+<script src="js/app.js"></script>      <!-- 6. Logique principale, sliders, onglets -->
+<script src="js/create.js"></script>   <!-- 7. Onglet Créer + Sauvegardés -->
 </body>
 </html>

@@ -1,3 +1,41 @@
+/*
+ * style.css — Feuille de styles principale de ChronoPath
+ *
+ * Organisation des sections :
+ *   1.  Variables CSS & Reset global
+ *   2.  Layout principal (sidebar + carte)
+ *   3.  En-tête sidebar (logo, onglets sport, sous-onglets)
+ *   4.  Panneaux de contenu (tab-panel)
+ *   5.  Filtres (sliders, boutons, groupes)
+ *   6.  Boutons principaux (recherche, secondaire, GPX)
+ *   7.  Résultats de recherche (cartes de résultats)
+ *   8.  Onglet Créer (stats, formulaire)
+ *   9.  Sauvegardés (cartes sauvegardées)
+ *  10.  Onglet Itinéraire (blocs A→B, résultat)
+ *  11.  Carte Leaflet (popups, tooltips, toast)
+ *  12.  Contrôles carte (GPS, couches, popup couches)
+ *  13.  Panneau détail itinéraire
+ *  14.  Point de départ (bloc start)
+ *  15.  Responsive / utilitaires
+ *
+ * Palette de couleurs :
+ *   --green      : #2d6a4f  (vert principal — boutons, accents)
+ *   --green-light: #40916c  (vert clair — hover)
+ *   --green-pale : #d8f3dc  (vert très pâle — badges)
+ *   --bg         : #f5f7f5  (fond général gris-vert)
+ *   --text       : #1a1a2e  (texte principal sombre)
+ *   --text-dim   : #6b7280  (texte secondaire gris)
+ *   --border     : #e5e7eb  (bordures légères)
+ *
+ * GIN HEIG-VD — 2025-2026
+ */
+
+
+/* ================================================================
+   1. VARIABLES CSS GLOBALES & RESET
+   Variables utilisées dans tout le fichier pour la cohérence visuelle.
+   Modifier --green ici change la couleur principale partout.
+   ================================================================ */
 :root {
   --green: #2d6a4f;
   --green-light: #40916c;
@@ -21,9 +59,17 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+
+/* Layout principal : flexbox horizontal
+   sidebar (largeur fixe) + #map (flex:1, plein écran) */
 body { font-family: var(--font); background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
 
 /* SIDEBAR */
+
+/* ================================================================
+   2. SIDEBAR — Panneau latéral gauche
+   Largeur fixe, hauteur plein écran, scrollable verticalement.
+   ================================================================ */
 #sidebar {
   width: var(--sidebar-w); height: 100vh; background: var(--white);
   border-right: 1px solid var(--border); display: flex; flex-direction: column;
@@ -33,6 +79,12 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 #sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
 /* HEADER */
+
+/* ================================================================
+   3. EN-TÊTE DE LA SIDEBAR
+   Contient le logo, les onglets sport et les sous-onglets.
+   Position sticky : reste visible même en scrollant.
+   ================================================================ */
 .sidebar-header { padding: 18px 16px 0; background: var(--white); position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--border); }
 
 .logo { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
@@ -45,7 +97,12 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .logo p { font-size: 11px; color: var(--text-dim); }
 
 /* SPORT TABS */
+
+/* Onglets sport : Vélo / Rando / Course
+   data-sport lu par app.js pour afficher les bons filtres */
 .sport-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+
+/* Bouton onglet sport — état inactif */
 .sport-tab {
   flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 8px 4px; background: var(--bg); border: 1px solid var(--border);
@@ -54,10 +111,15 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 }
 .sport-tab svg { width: 18px; height: 18px; }
 .sport-tab:hover { background: var(--green-pale); color: var(--green); border-color: var(--green-light); }
+
+/* Bouton onglet sport — état actif (vert plein) */
 .sport-tab.active { background: var(--green); color: white; border-color: var(--green); }
 .sport-tab.active svg { stroke: white; }
 
 /* SUB TABS */
+
+/* Sous-onglets : Rechercher / Créer / Sauvegardés / Itinéraire
+   data-tab correspond aux IDs des panneaux (panel-{tab}) */
 .sub-tabs { display: flex; border-bottom: none; margin: 0 -16px; padding: 0 16px; gap: 0; }
 .sub-tab {
   flex: 1; padding: 10px 4px; background: none; border: none; border-bottom: 2px solid transparent;
@@ -65,28 +127,55 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
   cursor: pointer; transition: all 0.15s; text-align: center;
 }
 .sub-tab:hover { color: var(--green); }
+
+/* Sous-onglet actif : souligné en vert */
 .sub-tab.active { color: var(--green); border-bottom-color: var(--green); font-weight: 600; }
 
 /* TAB PANELS */
+
+/* ================================================================
+   4. PANNEAUX DE CONTENU
+   Un seul panneau visible à la fois (class hidden sur les autres).
+   flex-direction:column pour empiler les éléments verticalement.
+   ================================================================ */
 .tab-panel { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-.tab-panel.hidden { display: none; }
+.tab-panel
+/* Utilitaire : masque un élément (remplace display:none en conservant
+   la compatibilité avec les transitions CSS) */
+.hidden { display: none; }
 
 /* FILTERS */
+
+/* ================================================================
+   5. FILTRES
+   Groupes de filtres spécifiques à chaque sport.
+   Masqués par défaut (.filters.hidden), affichés selon le sport actif.
+   ================================================================ */
 .filters { display: flex; flex-direction: column; gap: 14px; }
 .filters.hidden { display: none; }
 
 .filter-group { display: flex; flex-direction: column; gap: 6px; }
+
+/* Libellé d'un filtre + valeur affichée à droite (ex: "3.0 W/kg") */
 .filter-label { display: flex; justify-content: space-between; align-items: center; }
 .filter-label span:first-child { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--text-dim); }
 .filter-value { font-size: 12px; font-weight: 600; color: var(--green); font-family: var(--font-mono); }
 
 /* SLIDER */
+
+/* Slider HTML range — personnalisé en vert
+   La valeur est lue et affichée en temps réel dans app.js */
 .slider { -webkit-appearance: none; width: 100%; height: 4px; border-radius: 2px; background: var(--border); outline: none; }
 .slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--green); cursor: pointer; box-shadow: 0 1px 4px rgba(45,106,79,0.4); }
 .slider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--green); cursor: pointer; border: none; }
+
+/* Légende sous le slider : labels Débutant / Amateur / Expert */
 .slider-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); }
 
 /* BTN GROUP */
+
+/* Groupe de boutons filtres (ex: Facile / Moyen / Difficile)
+   Un seul bouton actif par groupe (géré par app.js) */
 .btn-group { display: flex; gap: 4px; }
 .btn-filter {
   flex: 1; padding: 6px 4px; background: var(--bg); border: 1px solid var(--border);
@@ -97,6 +186,11 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .btn-filter.active { background: var(--green); color: white; border-color: var(--green); }
 
 /* SEARCH BTN */
+
+/* ================================================================
+   6. BOUTONS PRINCIPAUX
+   ================================================================ */
+/* Bouton principal de recherche — vert plein, pleine largeur */
 .btn-search {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   padding: 12px; background: var(--green); color: white; border: none;
@@ -107,9 +201,16 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .btn-search:hover { background: var(--green-light); transform: translateY(-1px); box-shadow: var(--shadow); }
 
 /* RESULTS */
+
+/* ================================================================
+   7. RÉSULTATS DE RECHERCHE
+   Générés dynamiquement dans search.js (displaySearchResults).
+   ================================================================ */
 .results-header { font-size: 11px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: .07em; padding: 4px 0; }
 #results-list { display: flex; flex-direction: column; gap: 8px; }
 
+
+/* Carte d'un itinéraire résultat — bordure gauche colorée selon la direction */
 .result-card {
   background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 12px; cursor: pointer; transition: all 0.15s; position: relative;
@@ -119,6 +220,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 
 .result-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
 .result-name { font-size: 13px; font-weight: 600; color: var(--text); }
+
+/* Badge "pgRouting" ou "estimation" selon disponibilité du backend */
 .result-badge {
   font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 20px;
   text-transform: uppercase; letter-spacing: .04em; flex-shrink: 0;
@@ -133,6 +236,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .result-stat-lbl { font-size: 10px; color: var(--text-dim); }
 
 .result-actions { display: flex; gap: 6px; margin-top: 10px; }
+
+/* Boutons petits — utilisés dans les cartes de résultats et sauvegardés */
 .btn-sm {
   padding: 5px 10px; border-radius: 6px; font-size: 11px; font-weight: 500;
   cursor: pointer; font-family: var(--font); transition: all 0.15s; border: 1px solid;
@@ -155,6 +260,11 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 }
 #create-form input:focus, #create-form select:focus { border-color: var(--green); }
 
+
+/* ================================================================
+   8. ONGLET CRÉER
+   Statistiques en temps réel (distance, points) pendant le tracé.
+   ================================================================ */
 .create-stats { display: flex; gap: 8px; }
 .stat-mini { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 8px; text-align: center; }
 .stat-mini-val { display: block; font-size: 16px; font-weight: 700; color: var(--green); font-family: var(--font-mono); }
@@ -162,6 +272,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 
 .hint { font-size: 11px; color: var(--text-dim); }
 .btn-row { display: flex; gap: 8px; }
+
+/* Bouton secondaire — contour vert, fond transparent */
 .btn-secondary {
   flex: 1; padding: 9px; background: var(--bg); border: 1px solid var(--border);
   border-radius: 7px; font-family: var(--font); font-size: 12px; font-weight: 500;
@@ -171,11 +283,18 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .btn-secondary.active { background: var(--green); color: white; border-color: var(--green); }
 
 /* EMPTY STATE */
+
+/* État vide : affiché quand une liste est vide (ex: aucun sauvegardé) */
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 32px 16px; color: var(--text-dim); text-align: center; }
 .empty-state svg { opacity: 0.4; }
 .empty-state p { font-size: 13px; }
 
 /* SAVED CARDS */
+
+/* ================================================================
+   9. SAUVEGARDÉS
+   Cartes des itinéraires sauvegardés dans localStorage.
+   ================================================================ */
 .saved-card {
   background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px;
@@ -190,6 +309,10 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .leaflet-container { background: #e8f4e8; }
 
 /* Popup */
+
+/* ================================================================
+  11. CARTE LEAFLET — Personnalisation des popups et tooltips
+   ================================================================ */
 .leaflet-popup-content-wrapper {
   background: white !important; border: 1px solid var(--border) !important;
   border-radius: var(--radius) !important; box-shadow: var(--shadow-lg) !important;
@@ -207,6 +330,12 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .trail-popup-stat span { font-size: 10px; color: var(--text-dim); }
 
 /* DETAIL PANEL */
+
+/* ================================================================
+  13. PANNEAU DÉTAIL ITINÉRAIRE
+   Overlay affiché au clic sur un itinéraire prédéfini.
+   Position fixe, z-index élevé pour passer au-dessus de la carte.
+   ================================================================ */
 #detail-panel {
   position: fixed; bottom: 0; left: var(--sidebar-w); right: 0;
   background: white; border-top: 1px solid var(--border); padding: 16px 24px;
@@ -234,6 +363,11 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .detail-actions { display: flex; gap: 8px; }
 
 /* MAP CONTROLS */
+
+/* ================================================================
+  12. CONTRÔLES CARTE
+   Boutons GPS et couches superposés à la carte (position absolute).
+   ================================================================ */
 .map-controls {
   position: fixed; right: 16px; top: 50%; transform: translateY(-50%);
   display: flex; flex-direction: column; gap: 6px; z-index: 500;
@@ -248,6 +382,9 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .map-ctrl-btn.active { background: var(--green); border-color: var(--green); color: white; }
 
 /* LAYERS POPUP */
+
+/* Popup de sélection des couches (fond de carte + couches superposées)
+   Affiché/masqué par ctrl-layers dans map.js */
 #layers-popup {
   position: fixed; right: 64px; top: 50%; transform: translateY(-50%);
   background: white; border: 1px solid var(--border); border-radius: var(--radius);
@@ -267,6 +404,12 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .layer-toggle-opt input { accent-color: var(--green); }
 
 /* TOAST */
+
+/* ================================================================
+  15. TOAST — Notification temporaire
+   Affichée 3 secondes par showToast() dans map.js.
+   Classes : .toast.success (vert), .toast.error (rouge)
+   ================================================================ */
 .toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
   background: #1a1a2e; color: white; border-radius: 20px; padding: 10px 20px;
@@ -281,6 +424,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .sidebar-footer { margin-top: auto; padding: 12px 16px; font-size: 10px; color: var(--text-dim); border-top: 1px solid var(--border); }
 
 /* GPX export btn */
+
+/* Bouton export GPX — petit, style outline vert */
 .btn-gpx {
   padding: 5px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;
   cursor: pointer; font-family: var(--font); background: #1d4ed8; color: white;
@@ -289,6 +434,12 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .btn-gpx:hover { background: #1e40af; }
 
 /* POINT DE DÉPART */
+
+/* ================================================================
+  14. BLOC POINT DE DÉPART
+   Saisie du point de départ pour la recherche d'itinéraires.
+   3 boutons : recherche adresse, GPS, clic carte.
+   ================================================================ */
 .start-block {
   background: var(--green-bg); border: 1px solid #b7e4c7;
   border-radius: var(--radius); padding: 12px; display: flex;
@@ -333,6 +484,11 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
   outline: none; cursor: pointer;
 }
 
+
+/* ================================================================
+  10. ONGLET ITINÉRAIRE A→B
+   Blocs de saisie pour le départ (A), les étapes et l'arrivée (B).
+   ================================================================ */
 .route-point-block {
   background: var(--bg); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 6px;
@@ -368,6 +524,9 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+
+/* Zone de résultat du calcul d'itinéraire (masquée par défaut)
+   Affichée par displayRoute() dans routing.js */
 .route-result {
   background: var(--green-bg); border: 1px solid #b7e4c7;
   border-radius: var(--radius); padding: 12px;
@@ -381,6 +540,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .route-stat-val { font-size: 20px; font-weight: 700; font-family: var(--font-mono); color: var(--text); }
 .route-stat-lbl { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .05em; }
 
+
+/* Encart informatif sur pgRouting en bas du panneau itinéraire */
 .route-info-box {
   background: #fffbeb; border: 1px solid #fcd34d; border-radius: 7px;
   padding: 10px 12px; font-size: 11px; color: #92400e; line-height: 1.5;

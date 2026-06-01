@@ -1,28 +1,48 @@
 /**
  * app.js — Logique principale TrailFinder CH
  * GIN HEIG-VD
+ *
+ * Orchestre toute l'interface utilisateur :
+ *   - Onglets sport (Vélo / Rando / Course) → affiche les bons filtres
+ *   - Sous-onglets (Rechercher / Créer / Sauvegardés / Itinéraire)
+ *   - Sliders : mise à jour temps réel des valeurs affichées (W/kg, min/km...)
+ *   - Boutons filtres : un seul actif par groupe (data-filter)
+ *   - Recherche pgRouting via btn-search
+ *   - Onglet Créer : tracé manuel point par point sur la carte
+ *   - Toggle couches cartographiques (cantons, routes OSM)
+ *   - Point de départ : 3 modes (adresse Nominatim, GPS, clic carte)
+ *
+ * Dépendances : map.js, search.js (searchRoutesPgR, geocodeStart, setSearchStart),
+ *               cantons.js (loadCantons, loadRoutesSwisstopo),
+ *               trails.js (trailLayers, TRAILS), create.js (renderSaved)
  */
 
 // Initialisation du sport actif
+// Sport actif par défaut au chargement de la page.
 window.currentSport = 'velo';
 
 // =====================================================
 // SPORT TABS
 // =====================================================
+// Onglets sport : au clic, met à jour currentSport, affiche les filtres
+// correspondants et réinitialise la vue carte.
 document.querySelectorAll('.sport-tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.sport-tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
     window.currentSport = tab.dataset.sport;
 
+    // Masque tous les filtres puis affiche ceux du sport sélectionné.
     // Afficher les bons filtres
     document.querySelectorAll('.filters').forEach(f => f.classList.add('hidden'));
     document.getElementById(`filters-${window.currentSport}`).classList.remove('hidden');
 
+    // Masque les résultats et le panneau de détail de la session précédente.
     // Cacher les résultats
     document.getElementById('results-section').classList.add('hidden');
     document.getElementById('detail-panel').classList.add('hidden');
 
+    // Réinitialise la vue carte et vide les tracés d'itinéraires affichés.
     // Recentrer sur la Suisse romande
     map.setView([46.65, 6.85], 9);
     Object.values(trailLayers).forEach(l => map.removeLayer(l));
@@ -33,6 +53,8 @@ document.querySelectorAll('.sport-tab').forEach(tab => {
 // =====================================================
 // SUB TABS
 // =====================================================
+// Sous-onglets : affiche le panneau correspondant (panel-{tab}).
+// renderSaved() chargé depuis create.js est appelé à l'ouverture de Sauvegardés.
 document.querySelectorAll('.sub-tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
@@ -48,6 +70,8 @@ document.querySelectorAll('.sub-tab').forEach(tab => {
 // =====================================================
 // SLIDERS
 // =====================================================
+// Sliders : lie chaque slider HTML à son affichage via fmt().
+// Initialisé au chargement + écouteur "input" pour les changements en temps réel.
 const sliders = [
   { id: 'ftp-slider',           valId: 'ftp-val',           fmt: v => `${parseFloat(v).toFixed(1)} W/kg` },
   { id: 'duree-slider',         valId: 'duree-val',         fmt: v => formatDuree(parseFloat(v)) },
@@ -72,6 +96,8 @@ sliders.forEach(({ id, valId, fmt }) => {
 // =====================================================
 // FILTRES BOUTONS
 // =====================================================
+// Boutons filtres : désactive tous les boutons du groupe (data-filter)
+// puis active uniquement celui cliqué.
 document.querySelectorAll('.btn-filter').forEach(btn => {
   btn.addEventListener('click', () => {
     const group = btn.dataset.filter;
@@ -83,10 +109,12 @@ document.querySelectorAll('.btn-filter').forEach(btn => {
 // =====================================================
 // RECHERCHE (pgRouting)
 // =====================================================
+// Bouton "Trouver des itinéraires" : vérifie qu'un point de départ est défini
+// puis appelle searchRoutesPgR() (défini dans search.js).
 document.getElementById('btn-search').addEventListener('click', () => {
   const coords = window.searchStartCoords || (typeof searchStartCoords !== 'undefined' ? searchStartCoords : null);
   if (!coords) {
-    showToast("Définissez d'abord un point de départ 📍", "error");
+    showToast("Définissez d'abord un point de départ ", "error");
     return;
   }
   // S'assurer que les deux variables sont synchronisées
@@ -98,18 +126,22 @@ document.getElementById('btn-search').addEventListener('click', () => {
 // =====================================================
 // CRÉER UN ITINÉRAIRE
 // =====================================================
+// ── ONGLET CRÉER ─────────────────────────────────────────────────────────
+// Variables d'état pour le tracé manuel.
 let drawingTrail = false;
 let trailPoints  = [];
 let trailLine    = null;
 let trailDots    = [];
 
+// Bouton Tracer : bascule le mode dessin (curseur crosshair).
 document.getElementById('btn-draw-trail').addEventListener('click', () => {
   drawingTrail = !drawingTrail;
   document.getElementById('btn-draw-trail').classList.toggle('active', drawingTrail);
   map.getContainer().style.cursor = drawingTrail ? 'crosshair' : '';
-  if (drawingTrail) showToast('Cliquez sur la carte pour tracer — double-clic pour terminer');
+  if (drawingTrail) showToast('Cliquez sur la carte pour tracer "” double-clic pour terminer');
 });
 
+// Bouton Effacer : supprime tous les points et tracés du dessin.
 document.getElementById('btn-clear-trail').addEventListener('click', () => {
   drawingTrail = false;
   trailPoints  = [];
@@ -122,6 +154,8 @@ document.getElementById('btn-clear-trail').addEventListener('click', () => {
   map.getContainer().style.cursor = '';
 });
 
+// Clic carte en mode dessin : ajoute un point, trace la polyline
+// et calcule la distance cumulée via la formule de Haversine.
 map.on('click', e => {
   if (!drawingTrail) return;
   trailPoints.push([e.latlng.lat, e.latlng.lng]);
@@ -148,21 +182,23 @@ map.on('click', e => {
   }
 });
 
+// Double-clic : termine le tracé et invite à sauvegarder.
 map.on('dblclick', () => {
   if (drawingTrail) {
     drawingTrail = false;
     document.getElementById('btn-draw-trail').classList.remove('active');
     map.getContainer().style.cursor = '';
-    showToast('Tracé terminé — remplissez le formulaire et sauvegardez ✓', 'success');
+    showToast('Tracé terminé "” remplissez le formulaire et sauvegardez âœ“', 'success');
   }
 });
 
+// Formulaire de sauvegarde : valide puis redirige vers l'onglet Sauvegardés.
 document.getElementById('create-form').addEventListener('submit', e => {
   e.preventDefault();
   if (trailPoints.length < 2) { showToast('Tracez d\'abord un itinéraire', 'error'); return; }
 
   const name = document.getElementById('trail-name').value;
-  showToast(`Itinéraire "${name}" sauvegardé ✓`, 'success');
+  showToast(`Itinéraire "${name}" sauvegardé âœ“`, 'success');
 
   // Reset
   document.getElementById('create-form').reset();
@@ -174,6 +210,8 @@ document.getElementById('create-form').addEventListener('submit', e => {
 // =====================================================
 // COUCHES
 // =====================================================
+// ── COUCHES CARTOGRAPHIQUES ──────────────────────────────────────────────
+// Toggle cantons et routes OSM via les checkboxes du panneau Couches.
 document.getElementById('layer-cantons').addEventListener('change', e => {
   e.target.checked ? loadCantons() : layers.cantons.clearLayers();
 });
@@ -193,6 +231,8 @@ document.getElementById('layer-routes-sw').addEventListener('change', async e =>
 // POINT DE DÉPART
 // =====================================================
 
+// ── POINT DE DÉPART ──────────────────────────────────────────────────────
+// Mode 1 : adresse texte → géocodage Nominatim (geocodeStart dans search.js).
 // Recherche par adresse
 document.getElementById('btn-start-search').addEventListener('click', async () => {
   const val = document.getElementById('start-input').value.trim();
@@ -202,13 +242,16 @@ document.getElementById('btn-start-search').addEventListener('click', async () =
     const result = await geocodeStart(val);
     setSearchStart(result.lat, result.lon, result.label);
   } catch {
-    showToast('Adresse non trouvée — essayez "Yverdon" ou "Lausanne"', 'error');
+    showToast('Adresse non trouvée "” essayez "Yverdon" ou "Lausanne"', 'error');
   }
 });
 
+// Touche Entrée dans le champ adresse déclenche la même action que le bouton.
 document.getElementById('start-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('btn-start-search').click();
 });
+
+// Mode 2 : GPS → navigator.geolocation.getCurrentPosition().
 
 // GPS
 document.getElementById('btn-start-gps').addEventListener('click', () => {
@@ -221,18 +264,20 @@ document.getElementById('btn-start-gps').addEventListener('click', () => {
       window.searchStartCoords = { lat, lon };
       if (typeof searchStartCoords !== 'undefined') searchStartCoords = { lat, lon };
       const lbl = document.getElementById('start-label');
-      if (lbl) { lbl.textContent = '📍 Ma position GPS'; lbl.style.color = '#2d6a4f'; }
+      if (lbl) { lbl.textContent = 'Ma position GPS'; lbl.style.color = '#2d6a4f'; }
       // Marqueur sur la carte
       if (window.searchStartMarker) map.removeLayer(window.searchStartMarker);
       window.searchStartMarker = L.circleMarker([lat, lon], {
         radius: 10, color: '#2d6a4f', fillColor: '#2d6a4f', fillOpacity: 0.8, weight: 3,
       }).addTo(map).bindPopup('<b>Départ GPS</b>');
       map.setView([lat, lon], 13);
-      showToast('Position GPS définie ✓', 'success');
+      showToast('Position GPS définie âœ“', 'success');
     },
     () => showToast('GPS impossible', 'error')
   );
 });
+
+// Mode 3 : clic carte → curseur crosshair, attend le prochain clic.
 
 // Clic sur la carte
 let pickingStart = false;
@@ -252,8 +297,10 @@ map.on('click', e => {
 // =====================================================
 // INIT
 // =====================================================
+// ── INITIALISATION ───────────────────────────────────────────────────────
+// Appelée une fois au chargement. loadCantons et renderTrails sont désactivés.
 async function init() {
-  console.log('🗺 TrailFinder CH — HEIG-VD');
+  console.log('TrailFinder CH "” HEIG-VD');
 //  await loadCantons();// désactivé
   renderSaved();
 
@@ -263,4 +310,3 @@ async function init() {
 }
 
 init();
-

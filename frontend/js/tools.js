@@ -1,14 +1,24 @@
 /**
- * tools.js — Mesure, numérisation, altitude MNT
+ * tools.js — Mesure de distance, dessin et altitude MNT
  * GIN Webmapping — HEIG-VD
+ *
+ * Trois outils d'analyse sur la carte :
+ *   1. Mesure de distance : clics successifs → Haversine → distance cumulée
+ *   2. Dessin (Leaflet.Draw) : point, ligne (longueur auto), polygone (surface auto)
+ *   3. Altitude MNT au clic droit : GET /api/mnt/elevation → popup
+ *
+ * Dépendances : map.js (map, layers, showToast), api.js (getElevation)
  */
 
+// ── MESURE DE DISTANCE ───────────────────────────────────────────────────
 // ---- MESURE ----
+// Variables d'état de la mesure en cours.
 let _measuring = false;
 let _measurePts = [];
 let _measureLine = null;
 let _measureDots = [];
 
+// Active le mode mesure : réinitialise les points et passe en curseur crosshair.
 function startMeasure() {
   _measuring = true;
   _measurePts = [];
@@ -20,11 +30,13 @@ function startMeasure() {
   showToast('Mesure : cliquez, double-clic pour terminer');
 }
 
+// Désactive le mode mesure et restaure le curseur normal.
 function stopMeasure() {
   _measuring = false;
   map.getContainer().style.cursor = '';
 }
 
+// Distance en mètres entre deux points [lat,lon] via la formule de Haversine.
 function haversine(a, b) {
   const R = 6371000, toRad = d => d * Math.PI / 180;
   const dLat = toRad(b[0]-a[0]), dLon = toRad(b[1]-a[1]);
@@ -32,8 +44,10 @@ function haversine(a, b) {
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
 }
 
+// Formate la distance : affiche en km si ≥ 1000m, sinon en m.
 function fmtDist(m) { return m >= 1000 ? (m/1000).toFixed(2)+' km' : Math.round(m)+' m'; }
 
+// Clic en mode mesure : ajoute le point, trace la ligne, calcule la distance.
 map.on('click', async e => {
   if (!_measuring) return;
   const pt = [e.latlng.lat, e.latlng.lng];
@@ -51,11 +65,16 @@ map.on('click', async e => {
   }
 });
 
+// Double-clic termine la mesure.
 map.on('dblclick', () => { if (_measuring) stopMeasure(); });
 
+// ── DESSIN (Leaflet.Draw) ────────────────────────────────────────────────
 // ---- DESSIN ----
+// Référence à l'outil de dessin actif (un seul à la fois).
 let _drawer = null;
 
+// Active un outil Leaflet.Draw (point, ligne ou polygone).
+// Désactive l'outil précédent si nécessaire.
 function activateDraw(type) {
   if (_drawer) { _drawer.disable(); _drawer = null; }
   if (_measuring) stopMeasure();
@@ -69,6 +88,8 @@ function activateDraw(type) {
   if (_drawer) { _drawer.enable(); showToast(`Outil ${type} actif — double-clic pour terminer`); }
 }
 
+// Événement déclenché quand un élément est dessiné :
+// polygone → calcule la surface, ligne → calcule la longueur, point → affiche les coords.
 map.on(L.Draw.Event.CREATED, e => {
   const layer = e.layer;
   layers.drawn.addLayer(layer);
@@ -99,7 +120,10 @@ map.on(L.Draw.Event.CREATED, e => {
   showToast('Élément ajouté ✓', 'success');
 });
 
+// ── ALTITUDE MNT AU CLIC DROIT ───────────────────────────────────────────
 // ---- AFFICHAGE ALTITUDE MNT au clic droit ----
+// Clic droit : interroge /api/mnt/elevation.
+// Si indisponible, affiche uniquement les coordonnées du point.
 map.on('contextmenu', async e => {
   const { lat, lng } = e.latlng;
   const elev = await getElevation(lat, lng);
@@ -128,6 +152,7 @@ map.on('contextmenu', async e => {
   }
 });
 
+// ── BOUTONS DE L'INTERFACE ───────────────────────────────────────────────
 // ---- BOUTONS ----
 document.getElementById('tool-measure-line').addEventListener('click', e => {
   document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
@@ -177,6 +202,7 @@ map.on('locationerror', () => {
   showToast('Localisation impossible', 'error');
 });
 
+// Export en lecture seule via Object.defineProperty.
 // Exposer pour app.js
 window._measuring = false;
 window._drawer = null;

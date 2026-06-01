@@ -1,9 +1,23 @@
 /**
- * trails.js — Données et logique des itinéraires
- * Coordonnées vérifiées sur Swisstopo/OpenStreetMap
- * TrailFinder CH — GIN HEIG-VD
+ * trails.js — Itinéraires prédéfinis (base de données statique)
+ * GIN HEIG-VD
+ *
+ * Contient TRAILS[] : 15 itinéraires prédéfinis (5 vélo, 5 rando, 5 course)
+ * avec coordonnées vérifiées sur Swisstopo et OpenStreetMap.
+ *
+ * Structure d'un itinéraire : id, sport, name, description, difficulte,
+ * terrain, distance (km), duree (h), denivele (m), ftp (W/kg, vélo),
+ * region, coords [[lat,lon]...], color.
+ *
+ * Note : renderTrails() est commenté dans init() (app.js) pour éviter
+ * l'affichage automatique au démarrage.
+ *
+ * Fonctions exposées : renderTrails, filterTrails, showResults,
+ *   showDetail, exportGPX, saveTrail, renderSaved
  */
 
+// ── BASE DE DONNÉES ──────────────────────────────────────────────────────
+// 15 itinéraires avec coordonnées vérifiées sur Swisstopo/OSM.
 const TRAILS = [
   // ================================================================
   // VÉLO
@@ -295,6 +309,7 @@ const TRAILS = [
 // =====================================================
 // ÉTAT
 // =====================================================
+// ── ÉTAT ─────────────────────────────────────────────────────────────────
 let activeTrailId = null;
 let trailLayers = {};
 let savedTrails = JSON.parse(localStorage.getItem('savedTrails') || '[]');
@@ -305,6 +320,9 @@ const DIFF_COLORS  = { facile: '#166534', moyen: '#92400e', difficile: '#991b1b'
 // =====================================================
 // RENDU CARTE
 // =====================================================
+// ── RENDU CARTE ──────────────────────────────────────────────────────────
+// Affiche les polylignes et marqueurs sur la carte.
+// Stocke les couches dans trailLayers{} pour pouvoir les supprimer.
 function renderTrails(trails) {
   Object.values(trailLayers).forEach(l => map.removeLayer(l));
   trailLayers = {};
@@ -352,6 +370,8 @@ function renderTrails(trails) {
 // =====================================================
 // FILTRAGE
 // =====================================================
+// ── FILTRAGE ─────────────────────────────────────────────────────────────
+// Filtre TRAILS[] selon le sport actif et les valeurs des sliders.
 function filterTrails() {
   const sport = window.currentSport;
 
@@ -393,6 +413,8 @@ function filterTrails() {
 // =====================================================
 // RÉSULTATS
 // =====================================================
+// ── RÉSULTATS ────────────────────────────────────────────────────────────
+// Génère les cartes HTML de résultats dans la liste.
 function showResults(trails) {
   document.getElementById('results-section').classList.remove('hidden');
   document.getElementById('results-count').textContent =
@@ -433,6 +455,8 @@ function showResults(trails) {
 // =====================================================
 // DETAIL
 // =====================================================
+// ── DÉTAIL ───────────────────────────────────────────────────────────────
+// Affiche le panneau de détail d'un itinéraire (overlay sur la carte).
 function showDetail(trail) {
   activeTrailId = trail.id;
   const color = SPORT_COLORS[trail.sport];
@@ -480,6 +504,8 @@ function zoomToTrail(id) {
 // =====================================================
 // EXPORT GPX
 // =====================================================
+// ── EXPORT GPX ───────────────────────────────────────────────────────────
+// Génère un fichier .gpx standard depuis les coordonnées de l'itinéraire.
 function exportGPX(id) {
   const trail = TRAILS.find(t => t.id === id);
   if (!trail) return;
@@ -502,6 +528,8 @@ ${pts}
 // =====================================================
 // SAUVEGARDE
 // =====================================================
+// ── SAUVEGARDE FAVORIS ────────────────────────────────────────────────────
+// Stocke les IDs des itinéraires favoris dans localStorage.
 function saveTrail(id) {
   if (savedTrails.includes(id)) { showToast('Déjà sauvegardé !'); return; }
   savedTrails.push(id);
@@ -516,6 +544,8 @@ function removeSaved(id) {
   renderSaved();
 }
 
+// ── AFFICHAGE SAUVEGARDÉS ────────────────────────────────────────────────
+// Affiche les itinéraires sauvegardés dans le panneau Sauvegardés.
 function renderSaved() {
   const saved = TRAILS.filter(t => savedTrails.includes(t.id));
   const list = document.getElementById('saved-list');

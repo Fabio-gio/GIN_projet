@@ -1,8 +1,17 @@
 /**
- * cantons.js — Chargement des cantons romands
+ * cantons.js — Cantons romands + Routes OSM dynamiques
  * Source : CANTONS_Romands.gpkg (SwissBoundaries3D — Swisstopo)
+ *
+ * Gère deux couches cartographiques :
+ *   1. Cantons romands : polygones GeoJSON colorés par canton (KANTONSNUM),
+ *      chargés depuis data/cantons_romands.geojson (fichier local).
+ *   2. Routes OSM : tronçons depuis /api/osm-ways filtrés par bounding box,
+ *      rechargés automatiquement à chaque déplacement de la carte (moveend).
+ *
+ * Fonctions exposées : loadCantons, loadRoutesSwisstopo
  */
 
+// Couleur par numéro de canton (KANTONSNUM Swisstopo SwissBoundaries3D).
 const CANTON_COLORS = {
   2:  '#4361ee', // Berne
   10: '#2ec4b6', // Fribourg
@@ -13,28 +22,34 @@ const CANTON_COLORS = {
   26: '#06d6a0', // Jura
 };
 
+// Référence à la couche GeoJSON — conservée pour réafficher sans recharger.
 let cantonsGeoLayer = null;
 
+// Charge le GeoJSON local, crée les polygones Leaflet avec styles,
+// tooltips, popups et interactions de survol.
 async function loadCantons() {
   try {
     let geojson;
     // Toujours utiliser le GeoJSON local pré-converti
-    const res = await fetch('data/cantons_romands.geojson');
+    // Chargement du fichier GeoJSON servi par Go via r.Static("/data", ...).
+const res = await fetch('data/cantons_romands.geojson');
     if (!res.ok) throw new Error('cantons_romands.geojson introuvable');
     geojson = await res.json();
-    console.log('✅ Cantons chargés depuis GeoJSON local');
+    console.log('âœ… Cantons chargés depuis GeoJSON local');
 
     layers.cantons.clearLayers();
 
     cantonsGeoLayer = L.geoJSON(geojson, {
+      // Style : couleur selon le numéro de canton, remplissage semi-transparent.
       style: f => {
         const color = CANTON_COLORS[f.properties.KANTONSNUM] || '#adb5bd';
         return { color, weight: 2, opacity: 0.85, fillColor: color, fillOpacity: 0.13 };
       },
+      // Tooltip (nom), popup (infos canton), survol (opacité) et clic (panneau).
       onEachFeature: (feature, layer) => {
         const p = feature.properties;
         const color = CANTON_COLORS[p.KANTONSNUM] || '#adb5bd';
-        const pop = p.EINWOHNERZ ? Number(p.EINWOHNERZ).toLocaleString('fr-CH') : '—';
+        const pop = p.EINWOHNERZ ? Number(p.EINWOHNERZ).toLocaleString('fr-CH') : '"”';
 
         layer.bindTooltip(p.NAME, { permanent: false, direction: 'center', className: 'canton-tooltip' });
 
@@ -63,7 +78,7 @@ async function loadCantons() {
     });
 
     cantonsGeoLayer.addTo(layers.cantons);
-    showToast(`${geojson.features.length} cantons romands chargés ✓`, 'success');
+    showToast(`${geojson.features.length} cantons romands chargés âœ“`, 'success');
   } catch (err) {
     console.error('Erreur cantons:', err);
     showToast('Cantons : erreur de chargement', 'error');
@@ -71,9 +86,12 @@ async function loadCantons() {
 }
 
 // Toggle couche routes Swisstopo (route_decoup.gpkg via backend)
+// ── ROUTES OSM ───────────────────────────────────────────────────────────
 let routesSwissLoaded = false;
 let routesSwissLayer = null;
 
+// Charge les routes OSM depuis /api/osm-ways avec le bounding box courant.
+// Appelée au chargement initial et à chaque moveend de la carte.
 async function loadRoutesSwisstopo(bbox) {
   try {
     layers.routes.clearLayers();
@@ -94,6 +112,8 @@ async function loadRoutesSwisstopo(bbox) {
     routesSwissLayer = L.geoJSON(geojson, {
       style: f => {
         const tag = f.properties?.tag_id || 0;
+        // Couleur selon le tag_id OSM : rouge=autoroute, orange=principale,
+        // jaune=secondaire, vert=cyclable, bleu=autres.
         if (tag <= 102) return { color:'#e63946', weight:3, opacity:0.8 };       // motorway
         if (tag <= 107) return { color:'#ff9f1c', weight:2.5, opacity:0.8 };     // primary
         if (tag <= 109) return { color:'#ffd166', weight:2, opacity:0.75 };      // secondary/tertiary
@@ -104,13 +124,13 @@ async function loadRoutesSwisstopo(bbox) {
         const p = feature.properties;
         const types = {101:'Autoroute',106:'Route principale',108:'Route secondaire',109:'Route tertiaire',110:'Route résidentielle',118:'Piste cyclable',113:'Chemin',119:'Sentier pédestre'};
         const type = types[p.tag_id] || 'Route';
-        layer.bindPopup(`<div class="popup-content"><h4>🛣 ${p.name || type}</h4><p>${type}</p><div style="font-size:10px;color:#8892a4">Source: OSM</div></div>`);
+        layer.bindPopup(`<div class="popup-content"><h4>🏛£ ${p.name || type}</h4><p>${type}</p><div style="font-size:10px;color:#8892a4">Source: OSM</div></div>`);
       },
     });
 
     routesSwissLayer.addTo(layers.routes);
     routesSwissLoaded = true;
-    showToast(`${geojson.features.length} routes OSM chargées ✓`, 'success');
+    showToast(`${geojson.features.length} routes OSM chargées âœ“`, 'success');
   } catch (err) {
     console.warn('Routes OSM:', err.message);
     showToast('Erreur chargement routes OSM', 'error');
@@ -118,6 +138,7 @@ async function loadRoutesSwisstopo(bbox) {
 }
 
 // Toggle cantons
+// Checkbox cantons : réutilise la couche existante si déjà chargée.
 document.getElementById('layer-cantons').addEventListener('change', e => {
   if (e.target.checked) {
     cantonsGeoLayer ? cantonsGeoLayer.addTo(layers.cantons) : loadCantons();
@@ -127,6 +148,8 @@ document.getElementById('layer-cantons').addEventListener('change', e => {
 });
 
 // Toggle routes (chargées par bbox de la vue courante)
+// Checkbox routes : chargement initial + rechargement automatique au moveend.
+// L'événement nommé "moveend.routes" permet de le désenregistrer proprement.
 document.getElementById('layer-routes-sw').addEventListener('change', async e => {
   if (e.target.checked) {
     const bbox = map.getBounds();

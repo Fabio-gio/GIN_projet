@@ -1,9 +1,20 @@
 /**
- * routing.js — Calcul d'itinéraires via pgRouting
- * Départ/Arrivée cliquables sur la carte
+ * routing.js — Calcul d'itinéraires A→B avec étapes intermédiaires
  * TrailFinder CH — GIN HEIG-VD
+ *
+ * Gère l'onglet Itinéraire :
+ *   - Saisie départ/arrivée : adresse (Nominatim), GPS ou clic carte
+ *   - Calcul Dijkstra via GET /api/route (backend Go + pgRouting)
+ *   - Étapes intermédiaires : calcul segmenté A→W1→W2→...→B
+ *   - Chargement et affichage de fichiers GPX existants
+ *   - Export GPX du résultat calculé
+ *
+ * Fonctions exposées : startPicking, calculateRoute, clearRoute,
+ *   exportRouteGPX, geocodeForRoute, switchRouteTab, loadGPXFile,
+ *   clearGPX, addWaypointField, removeWaypoint, geocodeWaypoint, pickWaypoint
  */
 
+// ── ÉTAT GLOBAL ──────────────────────────────────────────────────────────
 let routeLayer      = null;
 let routeStartMarker = null;
 let routeEndMarker   = null;
@@ -11,9 +22,12 @@ let routeStart       = null;
 let routeEnd         = null;
 let pickingMode      = null; // 'start' | 'end' | null
 
+// Couleurs des tracés selon le sport actif.
 const ROUTE_COLORS = { velo: '#2d6a4f', rando: '#6b5344', course: '#dc2626' };
 
 // ---- Icônes départ / arrivée ----
+// Crée une icône goutte (DivIcon Leaflet) colorée selon le sport
+// pour les marqueurs A (départ) et B (arrivée).
 function makeRouteIcon(type, sport) {
   const color = ROUTE_COLORS[sport] || '#2d6a4f';
   const label = type === 'start' ? 'A' : 'B';
@@ -33,6 +47,8 @@ function makeRouteIcon(type, sport) {
 }
 
 // ---- Mode picking ----
+// Active le mode picking : curseur crosshair, attend le prochain clic sur la carte.
+// mode : "start" (départ A) ou "end" (arrivée B).
 function startPicking(mode) {
   pickingMode = mode;
   map.getContainer().style.cursor = 'crosshair';
@@ -41,6 +57,8 @@ function startPicking(mode) {
 }
 
 // ---- Clic sur la carte ----
+// Intercepte les clics en mode picking pour définir départ ou arrivée.
+// Lance calculateRoute() automatiquement si les deux points sont définis.
 map.on('click', async e => {
   if (!pickingMode) return;
   const { lat, lng } = e.latlng;
@@ -75,6 +93,7 @@ map.on('click', async e => {
 });
 
 // ---- Géocodage adresse ----
+// Géocode une adresse via Nominatim et place le marqueur sur la carte.
 async function geocodeForRoute(inputId, labelId, type) {
   const val = document.getElementById(inputId)?.value?.trim();
   if (!val) { showToast('Entre une adresse', 'error'); return; }
@@ -117,6 +136,9 @@ async function geocodeForRoute(inputId, labelId, type) {
 }
 
 // ---- Calcul d'itinéraire ----
+// Calcul principal via GET /api/route.
+// Si étapes présentes : calcul segmenté (un appel par segment).
+// Distance et durée totales = somme de tous les segments.
 async function calculateRoute() {
   if (!routeStart || !routeEnd) {
     showToast('Définissez le départ et l\'arrivée', 'error');
@@ -144,6 +166,7 @@ async function calculateRoute() {
 }
 
 // ---- Affichage du résultat ----
+// Affiche le tracé GeoJSON et met à jour le panneau de résultat.
 function displayRoute(data, sport) {
   if (routeLayer) map.removeLayer(routeLayer);
 
@@ -174,6 +197,7 @@ function displayRoute(data, sport) {
 }
 
 // ---- Effacer ----
+// Supprime le tracé, les marqueurs et réinitialise l'état.
 function clearRoute() {
   if (routeLayer)       { map.removeLayer(routeLayer);       routeLayer = null; }
   if (routeStartMarker) { map.removeLayer(routeStartMarker); routeStartMarker = null; }
@@ -189,6 +213,7 @@ function clearRoute() {
 }
 
 // ---- Export GPX du résultat ----
+// Génère et télécharge le fichier .gpx du résultat calculé.
 function exportRouteGPX() {
   if (!routeLayer) { showToast('Calculez d\'abord un itinéraire', 'error'); return; }
   const sport = document.getElementById('route-sport')?.value || 'velo';
@@ -219,6 +244,7 @@ window.exportRouteGPX   = exportRouteGPX;
 window.geocodeForRoute  = geocodeForRoute;
 
 // ---- Switch entre onglets A→B et GPX ----
+// Bascule entre les sous-onglets "A→B" et "Charger GPX".
 function switchRouteTab(tab) {
   const abPanel  = document.getElementById('route-ab-panel');
   const gpxPanel = document.getElementById('route-gpx-panel');
@@ -249,6 +275,7 @@ function switchRouteTab(tab) {
 }
 
 // ---- Chargement GPX ----
+// ── CHARGEMENT GPX ───────────────────────────────────────────────────────
 let gpxLayer = null;
 
 function loadGPXFile() {
@@ -305,8 +332,11 @@ window.switchRouteTab = switchRouteTab;
 window.loadGPXFile    = loadGPXFile;
 window.clearGPX       = clearGPX;
 
+// ── ÉTAPES INTERMÉDIAIRES ────────────────────────────────────────────────
+// Tableau d'objets {lat, lon} — null si une étape n'est pas encore définie.
 let routeWaypoints = [];
 
+// Ajoute dynamiquement un bloc HTML pour une nouvelle étape.
 function addWaypointField() {
   const idx = routeWaypoints.length;
   routeWaypoints.push(null);
@@ -334,13 +364,15 @@ function addWaypointField() {
   container.appendChild(div);
 }
 
+// Supprime une étape par index et recalcule si possible.
 function removeWaypoint(idx) {
   routeWaypoints[idx] = null;
   const el = document.getElementById(`waypoint-block-${idx}`);
   if (el) el.remove();
 }
 
-async function geocodeWaypoint(idx) {
+async // Géocode l'adresse d'une étape via Nominatim.
+function geocodeWaypoint(idx) {
   const val = document.getElementById(`waypoint-input-${idx}`)?.value?.trim();
   if (!val) return;
   try {
@@ -354,6 +386,7 @@ async function geocodeWaypoint(idx) {
 }
 
 let pickingWaypointIdx = null;
+// Active le mode picking pour définir une étape par clic sur la carte.
 function pickWaypoint(idx) {
   pickingWaypointIdx = idx;
   map.getContainer().style.cursor = 'crosshair';

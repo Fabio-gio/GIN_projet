@@ -1,14 +1,27 @@
 /**
  * search.js — Recherche d'itinéraires via pgRouting
  * TrailFinder CH — GIN HEIG-VD
+ *
+ * Gère l'onglet Rechercher :
+ *   1. L'utilisateur définit un point de départ (adresse, GPS ou clic carte)
+ *   2. searchRoutesPgR() envoie les paramètres au backend (sport, durée, FTP, VAP)
+ *   3. GET /api/search-routes retourne 3 itinéraires (boucles ou destinations)
+ *   4. displaySearchResults() affiche les tracés sur la carte et la liste HTML
+ *
+ * Fonctions exposées : searchRoutesPgR, setSearchStart, geocodeStart,
+ *                      zoomToSearchResult, exportSearchGPX
  */
 
+// État : coordonnées du point de départ et couches résultats affichées.
 window.searchStartCoords = null;
 let searchStartCoords = null;
 let searchStartMarker = null;
 let searchResultLayers = [];
 
+// ── GÉOCODAGE ────────────────────────────────────────────────────────────
 // ---- Géocodage pour le point de départ ----
+// Convertit une adresse en coordonnées via l'API Nominatim (OSM, gratuite, sans clé).
+// Filtre sur la Suisse (", Suisse" ajouté) et retourne {lat, lon, label}.
 async function geocodeStart(address) {
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address + ', Suisse')}&format=json&limit=1`;
   const res  = await fetch(url, { headers: { 'Accept-Language': 'fr' } });
@@ -17,6 +30,8 @@ async function geocodeStart(address) {
   return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), label: data[0].display_name.split(',')[0] };
 }
 
+// Enregistre le point de départ, place le marqueur vert sur la carte
+// et met à jour le label dans la sidebar.
 function setSearchStart(lat, lon, label) {
   searchStartCoords = { lat, lon };
   window.searchStartCoords = { lat, lon };
@@ -30,7 +45,10 @@ function setSearchStart(lat, lon, label) {
   showToast(`Départ : ${label} ✓`, 'success');
 }
 
+// ── RECHERCHE PGROUTING ──────────────────────────────────────────────────
 // ---- Recherche principale via pgRouting ----
+// Envoie la requête au backend avec tous les paramètres.
+// Désactive le bouton pendant le calcul pour feedback visuel.
 async function searchRoutesPgR() {
   const _coords = searchStartCoords || window.searchStartCoords;
   if (!_coords) {
@@ -38,10 +56,12 @@ async function searchRoutesPgR() {
     return;
   }
 
+  // Lecture des paramètres sport, mode, dénivelé depuis l'interface.
   const sport    = document.querySelector('.sport-tab.active')?.dataset.sport || 'velo';
   const mode     = document.querySelector('.btn-filter.active[data-filter="mode"]')?.dataset.val || 'boucle';
   const denivele = document.getElementById(sport === 'velo' ? 'denivele-slider' : sport === 'rando' ? 'denivele-rando-slider' : 'denivele-course-slider')?.value || 500;
 
+  // Calcul de la durée et distance cible selon le sport actif.
   let dureeH = 2;
   let distKm = 20;
 
@@ -56,10 +76,12 @@ async function searchRoutesPgR() {
     dureeH = distKm / 10;
   }
 
+  // Désactivation du bouton pendant le calcul.
   const btn = document.getElementById('btn-search');
   btn.textContent = 'Calcul en cours…';
   btn.disabled = true;
 
+  // Nettoyage des tracés de la recherche précédente.
   // Effacer les anciens résultats
   searchResultLayers.forEach(l => map.removeLayer(l));
   searchResultLayers = [];
@@ -93,7 +115,10 @@ async function searchRoutesPgR() {
   }
 }
 
+// ── AFFICHAGE DES RÉSULTATS ──────────────────────────────────────────────
 // ---- Affichage des résultats ----
+// Affiche la liste HTML et les tracés GeoJSON sur la carte.
+// isDemo=true si le backend retourne des estimations directes (sans pgRouting).
 function displaySearchResults(results, isDemo) {
   const section = document.getElementById('results-section');
   const list    = document.getElementById('results-list');
@@ -102,6 +127,7 @@ function displaySearchResults(results, isDemo) {
   section.classList.remove('hidden');
   count.textContent = `RÉSULTATS ${results.length} ITINÉRAIRE${results.length !== 1 ? 'S' : ''}${isDemo ? ' (estimation)' : ' — pgRouting ✓'}`;
 
+  // 3 couleurs distinctes pour les 3 itinéraires retournés.
   const COLORS = ['#2d6a4f', '#457b9d', '#e07a5f'];
 
   if (results.length === 0) {
@@ -109,6 +135,7 @@ function displaySearchResults(results, isDemo) {
     return;
   }
 
+  // Génération des cartes de résultat HTML avec boutons Voir et GPX.
   list.innerHTML = results.map((r, i) => `
     <div class="result-card" data-idx="${i}" style="border-left: 3px solid ${COLORS[i % COLORS.length]}">
       <div class="result-card-header">
@@ -125,6 +152,7 @@ function displaySearchResults(results, isDemo) {
       </div>
     </div>`).join('');
 
+  // Tracé de chaque itinéraire GeoJSON sur la carte Leaflet.
   // Afficher sur la carte
   results.forEach((r, i) => {
     if (!r.geojson) return;
@@ -136,6 +164,7 @@ function displaySearchResults(results, isDemo) {
     searchResultLayers.push(layer);
   });
 
+  // Ajuste la vue pour englober tous les tracés affichés.
   // Zoomer sur tous les résultats
   if (searchResultLayers.length > 0) {
     const group = L.featureGroup(searchResultLayers);
@@ -143,12 +172,15 @@ function displaySearchResults(results, isDemo) {
   }
 }
 
+// Centre la carte sur un itinéraire spécifique (bouton "Voir").
 function zoomToSearchResult(idx) {
   if (searchResultLayers[idx]) {
     map.fitBounds(searchResultLayers[idx].getBounds(), { padding: [40, 40] });
   }
 }
 
+// Génère et télécharge un fichier .gpx depuis les coordonnées du tracé.
+// extractCoords() gère récursivement tous les types GeoJSON possibles.
 function exportSearchGPX(idx) {
   const layer = searchResultLayers[idx];
   if (!layer) return;
@@ -157,6 +189,7 @@ function exportSearchGPX(idx) {
   let coords = [];
 
   // Extraire les coordonnées selon le type de géométrie
+  // Extraction récursive : LineString, GeometryCollection, Feature, FeatureCollection.
   const extractCoords = (geom) => {
     if (!geom) return;
     if (geom.type === 'LineString') coords = coords.concat(geom.coordinates);
@@ -185,6 +218,7 @@ ${pts}
   showToast('GPX exporté ✓', 'success');
 }
 
+// Export des fonctions globales.
 window.searchRoutesPgR = searchRoutesPgR;
 window.setSearchStart  = setSearchStart;
 window.geocodeStart    = geocodeStart;

@@ -1,8 +1,26 @@
 /**
- * create.js — Onglet Créer + Sauvegardés avec pgRouting
- * ChronoPath — GIN HEIG-VD
+ * create.js — Onglet Créer + Onglet Sauvegardés
+ * GIN HEIG-VD
+ *
+ * Onglet CRÉER :
+ *   - Mode tracer : clics sur la carte → points → calcul pgRouting par segment
+ *   - GET /api/route pour chaque paire de points consécutifs
+ *   - Sauvegarde dans localStorage (clé : 'chronopath-saved')
+ *
+ * Onglet SAUVEGARDÉS :
+ *   - Import GPX : extraction coords + dénivelé positif depuis les balises <ele>
+ *   - Voir, Modifier (rechargement dans Créer), Temps (calculateur),
+ *     Export GPX, Supprimer
+ *
+ * Calculateur de temps (computeTime) — mêmes formules que routing.go :
+ *   Vélo  : v = 8 + FTP × 6.5 km/h, ajustement niveau ×0.75/1.0/1.15
+ *   Course: v = VAP × facteur niveau + pénalité D+ (+0.5 min/100m)
+ *   Rando : Naismith 3.0/4.5/6.0 km/h + 1h par 300m D+
+ *
+ * Fonctions exposées : renderSavedItems (appelée par app.js et sub-tabs)
  */
 
+// ── ÉTAT — Onglet Créer ──────────────────────────────────────────────────
 let createWaypoints = [];
 let createMarkers = [];
 let createSegments = [];
@@ -12,8 +30,13 @@ let savedItems = JSON.parse(localStorage.getItem('chronopath-saved') || '[]');
 // =====================================================
 // INIT — attendre que map soit disponible
 // =====================================================
+// window.load garantit que map.js est chargé et que `map` est disponible
+// avant d'attacher les listeners sur la carte.
 window.addEventListener('load', () => {
 
+  // ── MODE TRACER ───────────────────────────────────────────────────────
+  // Chaque clic (isDrawing=true) ajoute un point dans createWaypoints[]
+  // et place un marqueur circulaire orange.
   // MODE TRACER
   document.getElementById('btn-draw-trail')?.addEventListener('click', () => {
     isDrawing = !isDrawing;
@@ -46,6 +69,9 @@ window.addEventListener('load', () => {
     }
   });
 
+  // ── CALCUL PGROUTING ──────────────────────────────────────────────────
+  // Pour chaque paire consécutive : GET /api/route.
+  // Les segments GeoJSON sont affichés en orange sur la carte.
   // CALCULER VIA PGROUTING
   document.getElementById('btn-calc-create')?.addEventListener('click', async () => {
     if (createWaypoints.length < 2) { showToast('Ajoutez au moins 2 points', 'error'); return; }
@@ -87,6 +113,7 @@ window.addEventListener('load', () => {
     }
   });
 
+  // ── EFFACER ───────────────────────────────────────────────────────────
   // EFFACER
   document.getElementById('btn-clear-trail')?.addEventListener('click', () => {
     createWaypoints = [];
@@ -106,6 +133,8 @@ window.addEventListener('load', () => {
     map.getContainer().style.cursor = '';
   });
 
+  // ── SAUVEGARDER ───────────────────────────────────────────────────────
+  // Crée un objet item et l'ajoute dans savedItems persisté dans localStorage.
   // SAUVEGARDER
   document.getElementById('create-form')?.addEventListener('submit', e => {
     e.preventDefault();
@@ -132,6 +161,9 @@ window.addEventListener('load', () => {
     document.querySelector('.sub-tab[data-tab="sauvegardes"]').click();
   });
 
+  // ── IMPORT GPX ────────────────────────────────────────────────────────
+  // FileReader API → parse XML → extrait <trkpt lat lon> et <ele>.
+  // Dénivelé positif = somme des différences d'altitude croissantes.
   // IMPORT GPX
   document.getElementById('gpx-import-input')?.addEventListener('change', e => {
     const file = e.target.files[0];
@@ -177,6 +209,8 @@ window.addEventListener('load', () => {
 // =====================================================
 // AFFICHER SAUVEGARDÉS
 // =====================================================
+// ── AFFICHAGE DES SAUVEGARDÉS ─────────────────────────────────────────
+// Génère le HTML de la liste avec boutons Voir/Modifier/Temps/GPX/Supprimer.
 function renderSavedItems() {
   const list = document.getElementById('saved-list');
   if (!list) return;
@@ -210,6 +244,7 @@ function renderSavedItems() {
 // VOIR
 // =====================================================
 let shownLayers = [];
+// Affiche le tracé d'un itinéraire sauvegardé sur la carte.
 function showSavedItem(id) {
   const item = savedItems.find(x => x.id === id);
   if (!item) return;
@@ -235,6 +270,7 @@ function showSavedItem(id) {
 // =====================================================
 // CALCULATEUR DE TEMPS
 // =====================================================
+// Ouvre le popup calculateur de temps pour un itinéraire sauvegardé.
 function calcTimeSaved(id) {
   const item = savedItems.find(x => x.id === id);
   if (!item) return;
@@ -284,6 +320,8 @@ function updateTcExtra() {
   }
 }
 
+// Calcule la durée estimée (mêmes algorithmes que routing.go).
+// Vélo: FTP, Course: VAP + pénalité D+, Rando: Naismith.
 function computeTime(distKm) {
   const sport   = document.getElementById('tc-sport').value;
   const niveau  = 'moyen';
@@ -344,6 +382,7 @@ function computeTime(distKm) {
 // =====================================================
 // EXPORT GPX
 // =====================================================
+// Génère et télécharge un fichier .gpx depuis les coordonnées sauvegardées.
 function exportSavedGPX(id) {
   const item = savedItems.find(x => x.id === id);
   if (!item) return;
@@ -364,6 +403,8 @@ function exportSavedGPX(id) {
 // =====================================================
 // ÉDITER
 // =====================================================
+// Recharge les points dans l'onglet Créer pour les modifier.
+// Sous-échantillonnage si trop de points (max 20, step = floor(n/20)).
 function editSavedItem(id) {
   const item = savedItems.find(x => x.id === id);
   if (!item) return;
@@ -394,6 +435,7 @@ function editSavedItem(id) {
 // =====================================================
 // SUPPRIMER
 // =====================================================
+// Supprime l'itinéraire de savedItems et met à jour localStorage.
 function deleteSavedItem(id) {
   if (!confirm('Supprimer cet itinéraire ?')) return;
   savedItems = savedItems.filter(x => x.id !== id);

@@ -12,6 +12,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// CalculateRoute — GET /api/route
+//
+// Calcule un itinéraire entre deux points (A→B) ou une boucle depuis un point.
+//
+// Paramètres obligatoires :
+//   fromLon, fromLat : coordonnées WGS84 du point de départ
+//
+// Paramètres optionnels :
+//   toLon, toLat    : coordonnées WGS84 de l'arrivée (requis si mode=destination)
+//   sport           : "velo" | "rando" | "course" (défaut : velo)
+//   mode            : "destination" | "boucle" (défaut : destination)
+//   distance_km     : distance cible pour les boucles (défaut : 20)
+//
+// Si pgRouting est indisponible → retourne buildDemoRoute() (estimations directes).
 func CalculateRoute(c *gin.Context) {
 	fromLon, err1 := strconv.ParseFloat(c.Query("fromLon"), 64)
 	fromLat, err2 := strconv.ParseFloat(c.Query("fromLat"), 64)
@@ -22,23 +36,30 @@ func CalculateRoute(c *gin.Context) {
 	sport := c.DefaultQuery("sport", "velo")
 	mode := c.DefaultQuery("mode", "destination")
 	distKm, _ := strconv.ParseFloat(c.DefaultQuery("distance_km", "20"), 64)
-	speedKmh := speedForSport(sport)
+	speedKmh := speedForSport(sport) // Vitesse par défaut (sans profil utilisateur)
 
+	// Tentative de récupération de la connexion DB.
+	// Si indisponible → mode démo avec estimations directes.
 	db, ok := getDB(c)
 	if !ok {
 		c.JSON(http.StatusOK, buildDemoRoute(fromLon, fromLat, fromLon, fromLat, sport, speedKmh, mode, distKm))
 		return
 	}
 
+	// findNearestNode convertit les coordonnées GPS en ID de nœud pgRouting
+	// via l'opérateur PostGIS <-> (distance KNN sur index GIST).
 	sourceNode, err := findNearestNode(db, fromLon, fromLat)
 	if err != nil {
 		c.JSON(http.StatusOK, buildDemoRoute(fromLon, fromLat, fromLon, fromLat, sport, speedKmh, mode, distKm))
 		return
 	}
 
+	// costExpression retourne la sous-requête SQL utilisée par pgr_dijkstra.
 	costExpr := costExpression(sport)
 
 	if mode == "boucle" {
+		// Boucle simple : source → point décalé NE → source.
+		// Le point intermédiaire est décalé de distKm/4 degrés (1° ≈ 111 km).
 		offsetLon := fromLon + (distKm/4)/111.0
 		offsetLat := fromLat + (distKm/4)/111.0
 		midNode, err := findNearestNode(db, offsetLon, offsetLat)
@@ -46,10 +67,12 @@ func CalculateRoute(c *gin.Context) {
 			c.JSON(http.StatusOK, buildDemoRoute(fromLon, fromLat, fromLon, fromLat, sport, speedKmh, mode, distKm))
 			return
 		}
+		// Calcul aller (source→mid) et retour (mid→source).
 		geo1, dist1 := dijkstra(db, costExpr, sourceNode, midNode)
 		geo2, dist2 := dijkstra(db, costExpr, midNode, sourceNode)
 		totalDist := dist1 + dist2
 		durationMin := (totalDist / 1000.0) / speedKmh * 60.0
+		// Fusion des deux géométries en GeometryCollection GeoJSON.
 		geojsonStr := mergeGeometries(geo1, geo2)
 		if geojsonStr == "" {
 			c.JSON(http.StatusOK, buildDemoRoute(fromLon, fromLat, fromLon, fromLat, sport, speedKmh, mode, distKm))
@@ -64,6 +87,7 @@ func CalculateRoute(c *gin.Context) {
 		return
 	}
 
+	// Mode destination : lecture et validation des paramètres d'arrivée.
 	toLon, err3 := strconv.ParseFloat(c.Query("toLon"), 64)
 	toLat, err4 := strconv.ParseFloat(c.Query("toLat"), 64)
 	if err3 != nil || err4 != nil {
@@ -75,8 +99,10 @@ func CalculateRoute(c *gin.Context) {
 		c.JSON(http.StatusOK, buildDemoRoute(fromLon, fromLat, toLon, toLat, sport, speedKmh, mode, distKm))
 		return
 	}
+	// Calcul Dijkstra A→B.
 	geojsonStr, distM := dijkstra(db, costExpr, sourceNode, targetNode)
 	if geojsonStr == "" {
+		// Aucun chemin trouvé dans le graphe → mode démo.
 		c.JSON(http.StatusOK, buildDemoRoute(fromLon, fromLat, toLon, toLat, sport, speedKmh, mode, distKm))
 		return
 	}
@@ -89,6 +115,27 @@ func CalculateRoute(c *gin.Context) {
 	})
 }
 
+// SearchRoutes — GET /api/search-routes
+//
+// Génère 3 itinéraires dans des directions différentes depuis un point de départ,
+// adaptés au profil physiologique de l'utilisateur.
+//
+// Paramètres :
+//   fromLon, fromLat : coordonnées WGS84 du point de départ (obligatoires)
+//   sport            : "velo" | "rando" | "course"
+//   mode             : "boucle" | "destination"
+//   duree_h          : durée souhaitée en heures
+//   niveau           : "debutant" | "moyen" | "expert"
+//   ftp              : Functional Threshold Power en W/kg (vélo)
+//   vap              : Vitesse Aérobie Maximale en km/h (course)
+//
+// Algorithme des boucles triangulaires :
+//   1. Calcul vitesse via computeSpeed(sport, niveau, ftp, vap)
+//   2. Distance cible = duree_h × vitesse
+//   3. Rayon = distance_cible / 2.6 (facteur sinuosité des routes réelles)
+//   4. Pour chaque direction (NE, NO, SE) :
+//      source → mid1 → mid2 (perpendiculaire, rayon ×0.6) → source
+//   5. Fallback aller-retour si mid2 invalide ou chemin introuvable
 func SearchRoutes(c *gin.Context) {
 	fromLon, err1 := strconv.ParseFloat(c.Query("fromLon"), 64)
 	fromLat, err2 := strconv.ParseFloat(c.Query("fromLat"), 64)
@@ -134,6 +181,8 @@ func SearchRoutes(c *gin.Context) {
 
 	costExpr := costExpression(sport)
 
+	// 3 directions de points intermédiaires (NE, NO, SE).
+	// Conversion degrés → km : 1° ≈ 111 km.
 	directions := [][2]float64{
 		{fromLon + radius/111.0, fromLat + radius/111.0},
 		{fromLon - radius/111.0, fromLat + radius/111.0*0.8},
@@ -145,6 +194,7 @@ func SearchRoutes(c *gin.Context) {
 
 	dirLabels := []string{"Nord-Est", "Nord-Ouest", "Sud-Est"}
 
+	// Structure de résultat pour la réponse JSON.
 	type RouteResult struct {
 		Name     string      `json:"name"`
 		Distance float64     `json:"distance_km"`
@@ -186,7 +236,7 @@ func SearchRoutes(c *gin.Context) {
 				geo3, dist3 := dijkstra(db, costExpr, mid2Node, sourceNode)
 				log.Printf("triangle %d: %.0f + %.0f + %.0f", i, dist1, dist2, dist3)
 				if geo1 == "" || geo2 == "" || geo3 == "" {
-					// Fallback aller-retour
+					// Fallback aller-retour si un segment Dijkstra échoue
 					geo1, dist1 = dijkstra(db, costExpr, sourceNode, midNode)
 					geo2, dist2 = dijkstra(db, costExpr, midNode, sourceNode)
 					if geo1 == "" && geo2 == "" { continue }
@@ -198,6 +248,7 @@ func SearchRoutes(c *gin.Context) {
 				}
 			}
 		} else {
+			// Mode destination : itinéraire simple source → mid1.
 			geo1, dist1 := dijkstra(db, costExpr, sourceNode, midNode)
 			if geo1 == "" { continue }
 			totalDist = dist1 / 1000.0
@@ -206,6 +257,7 @@ func SearchRoutes(c *gin.Context) {
 
 		if totalDist < 0.5 || geojsonStr == "" { continue }
 
+		// Formatage de la durée en "Hh MM".
 		dh := totalDist / speedKmh
 		h  := int(dh)
 		m  := int((dh - float64(h)) * 60)
@@ -221,6 +273,7 @@ func SearchRoutes(c *gin.Context) {
 		})
 	}
 
+	// Si aucun résultat pgRouting → mode démo.
 	if len(results) == 0 {
 		c.JSON(http.StatusOK, buildDemoSearchResults(fromLon, fromLat, sport, targetDist, speedKmh))
 		return
@@ -229,6 +282,9 @@ func SearchRoutes(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"results": results, "source": "pgRouting + OSM", "demo": false})
 }
 
+// getDB extrait la connexion PostgreSQL depuis le contexte Gin.
+// La DB est injectée par le middleware dans main.go via c.Set("db", db).
+// Retourne (nil, false) si la DB n'est pas disponible → mode démo.
 func getDB(c *gin.Context) (*sql.DB, bool) {
 	dbInterface, exists := c.Get("db")
 	if !exists { return nil, false }
@@ -238,12 +294,32 @@ func getDB(c *gin.Context) (*sql.DB, bool) {
 	return db, true
 }
 
+// findNearestNode trouve le nœud pgRouting le plus proche d'un point GPS.
+//
+// Utilise l'opérateur PostGIS <-> (distance KNN) avec l'index GIST
+// pour une recherche très performante sur les 291 381 nœuds OSM.
+// C'est la passerelle entre les coordonnées GPS et le graphe routier pgRouting.
 func findNearestNode(db *sql.DB, lon, lat float64) (int64, error) {
 	var node int64
 	err := db.QueryRow(`SELECT id FROM ways_vertices_pgr ORDER BY the_geom <-> ST_SetSRID(ST_MakePoint($1,$2),4326) LIMIT 1`, lon, lat).Scan(&node)
 	return node, err
 }
 
+// dijkstra calcule le plus court chemin entre deux nœuds via pgRouting.
+//
+// Requête SQL :
+//   pgr_dijkstra(sql_réseau, source, target, directed=true)
+//     → retourne les arêtes du chemin optimal (r.edge = gid de la way)
+//   JOIN ways w ON r.edge = w.gid
+//     → récupère la géométrie de chaque tronçon
+//   ST_Union(w.the_geom)
+//     → fusionne tous les LineString en une seule géométrie
+//   ST_AsGeoJSON(...)
+//     → convertit en chaîne JSON pour la réponse API
+//   SUM(w.length_m)
+//     → distance totale du chemin en mètres
+//
+// Retourne ("", 0) si aucun chemin trouvé.
 func dijkstra(db *sql.DB, costExpr string, source, target int64) (string, float64) {
 	if source == target { return "", 0 }
 	var geojsonStr string
@@ -254,6 +330,8 @@ func dijkstra(db *sql.DB, costExpr string, source, target int64) (string, float6
 	return geojsonStr, distM
 }
 
+// mergeGeometries fusionne deux géométries GeoJSON en une GeometryCollection.
+// Utilisé pour combiner les deux segments d'une boucle aller-retour.
 func mergeGeometries(geo1, geo2 string) string {
 	if geo1 == "" && geo2 == "" { return "" }
 	if geo1 == "" { return geo2 }
@@ -265,6 +343,8 @@ func mergeGeometries(geo1, geo2 string) string {
 	return string(b)
 }
 
+// mergeThree fusionne trois géométries GeoJSON en une GeometryCollection.
+// Utilisé pour les boucles triangulaires (3 segments Dijkstra).
 func mergeThree(geo1, geo2, geo3 string) string {
 	var g1, g2, g3 map[string]interface{}
 	json.Unmarshal([]byte(geo1), &g1)
@@ -274,6 +354,8 @@ func mergeThree(geo1, geo2, geo3 string) string {
 	return string(b)
 }
 
+// buildFeature construit un GeoJSON Feature avec propriétés distance et durée.
+// Format attendu par L.geoJSON() dans Leaflet (standard RFC 7946).
 func buildFeature(geojsonStr string, distKm, durationMin float64, sport string) map[string]interface{} {
 	return map[string]interface{}{
 		"type": "Feature", "geometry": json.RawMessage(geojsonStr),
@@ -281,20 +363,38 @@ func buildFeature(geojsonStr string, distKm, durationMin float64, sport string) 
 	}
 }
 
+// costExpression retourne la sous-requête SQL utilisée par pgr_dijkstra.
+// Utilise toutes les routes avec cost_s > 0 (coût positif = traversable).
+// Les autoroutes ont naturellement un coût élevé dans osm2pgrouting → peu utilisées.
 func costExpression(sport string) string {
 	// Utiliser toutes les routes pour garantir la connectivité du graphe
 	// Les autoroutes ont un coût très élevé dans osm2pgrouting donc peu utilisées
 	return "SELECT gid AS id, source, target, cost_s AS cost, reverse_cost_s AS reverse_cost FROM ways WHERE cost_s > 0"
 }
 
+// speedForSport retourne une vitesse par défaut selon le sport.
+// Utilisé par CalculateRoute() qui n'a pas de profil utilisateur détaillé.
 func speedForSport(sport string) float64 {
 	switch sport {
-	case "rando":  return 5.0
-	case "course": return 10.0
-	default:       return 20.0
+	case "rando":  return 5.0  // km/h — rando moyenne
+	case "course": return 10.0 // km/h — course moyenne
+	default:       return 20.0 // km/h — vélo moyen
 	}
 }
 
+// computeSpeed calcule la vitesse selon le sport, le niveau et le profil physiologique.
+//
+// Vélo — FTP (Functional Threshold Power) :
+//   vitesse = 10 + FTP × 4 km/h
+//   Ajustement niveau : ×0.75 (débutant) / ×1.0 (moyen) / ×1.15 (expert)
+//   Limites : 12–45 km/h
+//
+// Course — VAP (Vitesse Aérobie Maximale) :
+//   vitesse = VAP_kmh × facteur_niveau (0.65 / 0.80 / 0.90)
+//   Limites : 6–22 km/h
+//
+// Rando — Naismith simplifié (sans dénivelé ici, géré côté frontend) :
+//   Débutant : 3.0 km/h / Moyen : 4.5 km/h / Expert : 6.0 km/h
 func computeSpeed(sport, niveau string, ftp, vap float64) float64 {
 	switch sport {
 	case "velo":
@@ -326,6 +426,9 @@ func computeSpeed(sport, niveau string, ftp, vap float64) float64 {
 	return 15.0
 }
 
+// buildDemoSearchResults génère 3 itinéraires fictifs (lignes simplifiées)
+// utilisés quand pgRouting n'est pas disponible.
+// Permet à l'interface de rester fonctionnelle sans base de données.
 func buildDemoSearchResults(fromLon, fromLat float64, sport string, distKm, speedKmh float64) gin.H {
 	type R struct {
 		Name string `json:"name"`; Distance float64 `json:"distance_km"`; Duration string `json:"duration"`
@@ -346,6 +449,9 @@ func buildDemoSearchResults(fromLon, fromLat float64, sport string, distKm, spee
 	return gin.H{"results":results,"source":"Estimation directe","demo":true}
 }
 
+// buildDemoRoute génère un itinéraire fictif (sans pgRouting) pour le mode démo.
+// Crée une ligne brisée simple entre départ et arrivée avec quelques inflexions
+// pour simuler la sinuosité des routes réelles.
 func buildDemoRoute(fromLon, fromLat, toLon, toLat float64, sport string, speedKmh float64, mode string, distKm float64) gin.H {
 	var coords [][2]float64; var distM float64
 	if mode == "boucle" {
@@ -362,6 +468,12 @@ func buildDemoRoute(fromLon, fromLat, toLon, toLat float64, sport string, speedK
 		"geojson":map[string]interface{}{"type":"Feature","geometry":map[string]interface{}{"type":"LineString","coordinates":json.RawMessage(coordsJSON)},"properties":map[string]interface{}{}}}
 }
 
+// haversineMeters calcule la distance en mètres entre deux points GPS
+// via la formule de Haversine (distance orthodromique sur la sphère terrestre).
+//
+// Formule :
+//   a = sin²(Δφ/2) + cos(φ1)·cos(φ2)·sin²(Δλ/2)
+//   d = R × 2 × atan2(√a, √(1−a))   avec R = 6 371 000 m
 func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
 	const R = 6371000.0
 	phi1 := lat1*math.Pi/180; phi2 := lat2*math.Pi/180
