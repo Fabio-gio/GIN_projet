@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <relation_types>
+    <relation_type name="route" id="0" priority="1.0" multipolygon="no"/>
+  </relation_types>
+  <tag_definitions>
+    <!-- ROUTES VÉLO -->
+    <class name="cycleway"  id="100" priority="0.5"  maxspeed="20" maxspeed_forward="20" maxspeed_backward="20" />
+    <class name="path"      id="101" priority="0.75" maxspeed="15" maxspeed_forward="15" maxspeed_backward="15" />
+
+    <!-- ROUTES PIÉTONS / RANDO -->
+    <class name="footway"   id="300" priority="0.5"  maxspeed="5"  maxspeed_forward="5"  maxspeed_backward="5"  />
+    <class name="steps"     id="301" priority="1.0"  maxspeed="3"  maxspeed_forward="3"  maxspeed_backward="3"  />
+    <class name="track"     id="302" priority="0.8"  maxspeed="8"  maxspeed_forward="8"  maxspeed_backward="8"  />
+
+    <!-- ROUTES PRINCIPALES -->
+    <class name="motorway"       id="200" priority="5.0"  maxspeed="120" maxspeed_forward="120" maxspeed_backward="120" />
+    <class name="motorway_link"  id="201" priority="4.0"  maxspeed="80"  maxspeed_forward="80"  maxspeed_backward="80"  />
+    <class name="trunk"          id="202" priority="4.0"  maxspeed="100" maxspeed_forward="100" maxspeed_backward="100" />
+    <class name="primary"        id="203" priority="3.0"  maxspeed="80"  maxspeed_forward="80"  maxspeed_backward="80"  />
+    <class name="secondary"      id="204" priority="2.5"  maxspeed="60"  maxspeed_forward="60"  maxspeed_backward="60"  />
+    <class name="tertiary"       id="205" priority="2.0"  maxspeed="50"  maxspeed_forward="50"  maxspeed_backward="50"  />
+    <class name="residential"    id="206" priority="1.5"  maxspeed="30"  maxspeed_forward="30"  maxspeed_backward="30"  />
+    <class name="living_street"  id="207" priority="1.0"  maxspeed="10"  maxspeed_forward="10"  maxspeed_backward="10"  />
+    <class name="unclassified"   id="208" priority="1.5"  maxspeed="50"  maxspeed_forward="50"  maxspeed_backward="50"  />
+    <class name="service"        id="209" priority="1.0"  maxspeed="20"  maxspeed_forward="20"  maxspeed_backward="20"  />
+  </tag_definitions>
+
+  <osm_type name="highway">
+    <tag name="cycleway"       class_id="100" />
+    <tag name="path"           class_id="101" />
+    <tag name="footway"        class_id="300" />
+    <tag name="steps"          class_id="301" />
+    <tag name="track"          class_id="302" />
+    <tag name="motorway"       class_id="200" />
+    <tag name="motorway_link"  class_id="201" />
+    <tag name="trunk"          class_id="202" />
+    <tag name="primary"        class_id="203" />
+    <tag name="secondary"      class_id="204" />
+    <tag name="tertiary"       class_id="205" />
+    <tag name="residential"    class_id="206" />
+    <tag name="living_street"  class_id="207" />
+    <tag name="unclassified"   class_id="208" />
+    <tag name="service"        class_id="209" />
+  </osm_type>
+</configuration>

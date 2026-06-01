@@ -1,0 +1,21 @@
+services:
+  db:
+    image: pgrouting/pgrouting:16-3.5-4.0
+    container_name: gin_pgrouting
+    environment:
+      POSTGRES_DB:       webmapping
+      POSTGRES_USER:     gin
+      POSTGRES_PASSWORD: ginpass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01_init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gin -d webmapping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

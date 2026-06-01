@@ -1,0 +1,32 @@
+# Go
+backend/webmapping-server
+backend/*.exe
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# =============================================
+# DONNÉES LOURDES — non versionnées sur GitHub
+# À stocker localement dans Donnees_finales/
+# =============================================
+Donnees_finales/route_decoup.gpkg
+Donnees_finales/MNT_Romandies.tif
+
+# CANTONS_Romands.gpkg (1.6 MB) → versionné ✅
+# Les autres fichiers > 50 MB → non versionnés
+
+# Logs
+*.log
+
+# Env
+.env
+.env.local
+Donnees/SHP/ 
+Donnees/*.gpkg 
+~$* 
